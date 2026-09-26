@@ -6,7 +6,8 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Project, ScriptTarget } from "ts-morph";
+import { runInNewContext } from "node:vm";
+import { Project, ScriptTarget, ts } from "ts-morph";
 import { extractModule } from "../src/extract.ts";
 import { resolveModule } from "../src/resolve.ts";
 import { autoHavocModule } from "../src/autohavoc.ts";
@@ -229,10 +230,19 @@ for (const [label, code] of [
 
 for (const [label, code, error] of [
   ["mutable closure", `export function bad():()=>number { let x=0; return ():number => ++x; }`, /mutation of captured variable/],
+  ["reassigned captured parameter", `export function bad(x:number):number { const get=():number=>x; x++; return get(); }`, /mutation of captured variable/],
+  ["shorthand capture", `type Box={x:number}; export function bad():Box { let x=0; const get=():Box=>({x}); x=1; return get(); }`, /mutation of captured variable/],
+  ["wrapped captured update", `export function bad():number { const xs=[1]; const get=():number=>xs[0]; (xs as number[])[0]=2; return get(); }`, /mutation of captured variable/],
+  ["wrapped captured mutator", `export function bad():number { const xs=[1]; const get=():number=>xs.length; (xs.push)(2); return get(); }`, /mutation of captured variable/],
+  ["outer update of captured this", `export class Box { value:number=0; bad():number { const get=():number=>this.value; this.value++; return get(); } }`, /mutation of captured variable/],
+  ["callback update of this", `export class Box { value:number=0; bad():()=>number { return ():number=>++this.value; } }`, /mutation of captured variable/],
   ["module mutation", `const xs=[1]; xs[0]=2; export function bad():number { return xs[0]; }`, /module-level statement/],
   ["escaped array constant", `export const xs=[1]; export function bad():number { return xs[0]; }`, /scalar module constants/],
   ["callback mutation", `export function bad(xs:number[]):number[] { return xs.map((x:number):number => { xs[0]=x; return x; }); }`, /mutation of captured variable/],
   ["reference equality", `export function bad(xs:number[],ys:number[]):boolean { return xs===ys; }`, /reference equality/],
+  ["tuple identity", `export function bad(x:[number],y:[number]):boolean { return x===y; }`, /reference equality/],
+  ["optional object identity", `type Box={x:number}; export function bad(x:Box|undefined,y:Box|undefined):boolean { return x===y; }`, /reference equality/],
+  ["generic identity", `export function bad<A>(x:A,y:A):boolean { return x===y; }`, /reference equality/],
   ["function identity", `export function bad(f:()=>number,g:()=>number):boolean { return f===g; }`, /reference equality/],
   ["index callback", `export function bad(xs:number[]):number[] { return xs.map((x:number,i:number):number => x+i); }`, /1-parameter callback/],
   ["thisArg", `export function bad(xs:number[]):number[] { return xs.map((x:number):number => x, 0); }`, /thisArg/],
@@ -241,7 +251,8 @@ for (const [label, code, error] of [
   ["default parameter", `export function bad(x:number=1):number { return x; }`, /defaulted and rest/],
   ["rest parameter", `export function bad(...xs:number[]):number { return xs.length; }`, /defaulted and rest/],
   ["async", `export async function bad():Promise<number> { return await Promise.resolve(1); }`, /async functions|await/i],
-  ["constraint", `export function bad<A extends number>(x:A):number { return x; }`, /constrained/],
+  ["non-primitive constraint", `export function bad<A extends {value:number}>(x:A):number { return x.value; }`, /constrained/],
+  ["default type parameter", `export function bad<A=number>(x:A):A { return x; }`, /defaulted/],
   ["type alias shadowing", `type A=number; export function bad<A>(x:A):A { return x; }`, /shadowing type aliases/],
   ["nested contract", `export function bad():(x:number)=>number { return (x:number):number => {\n //@ ensures false\n return x; }; }`, /nested lambda contracts/],
   ["unsafe literal", `export function bad():number { return 9007199254740993; }`, /safe integers/],
@@ -250,6 +261,70 @@ for (const [label, code, error] of [
 ] as const) {
   test(`generation rejects ${label}`, () => assert.throws(() => compile(code), error));
 }
+
+// Each false contract below used to verify. Execute the same source to retain
+// the counterexample, then require rejection before an F* model can be emitted.
+for (const [label, code, actual, error] of [
+  ["reassignment after closure creation", String.raw`export function bad():number {
+    //@ ensures \result === 0
+    let x=0;
+    const get=():number=>x;
+    x=1;
+    return get();
+  }`, 1, /mutation of captured variable/],
+  ["array update after closure creation", String.raw`export function bad():number {
+    //@ ensures \result === 1
+    const xs=[1];
+    const get=():number=>xs.length;
+    xs.push(2);
+    return get();
+  }`, 2, /mutation of captured variable/],
+  ["structural equality replacing object identity", String.raw`type Box={value:number};
+  export function bad():boolean {
+    //@ ensures \result
+    const a:Box={value:1};
+    const b:Box={value:1};
+    return a===b;
+  }`, false, /reference equality/],
+] as const) {
+  test(`source guard rejects falsely provable ${label}`, () => {
+    const javascript = ts.transpileModule(code, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    const exports: { bad?: () => unknown } = {};
+    runInNewContext(javascript, { exports });
+    assert.equal(exports.bad!(), actual);
+    assert.throws(() => compile(code), error);
+  });
+}
+
+test("capture checks preserve immutable snapshots, shadowing and nullable value tests", realFstar, () => {
+  assert.equal(verify(String.raw`
+    type Box={value:number};
+    export function test(box:Box|undefined):number {
+      //@ ensures \result === 3
+      let x=0;
+      const snapshot=x;
+      const get=():number=>snapshot;
+      x=1;
+      const scoped=():number=>{ const x=2; return x; };
+      if (box === undefined) return get()+x+scoped();
+      return get()+x+scoped();
+    }
+  `), true);
+});
+
+test("generic equality accepts a primitive input constraint", realFstar, () => {
+  assert.equal(verify(String.raw`
+    export function same<T extends number | string>(x:T,y:T):boolean {
+      return x===y;
+    }
+    export function test(n:number,s:string):boolean {
+      //@ ensures \result
+      return same(n,n) && same(s,s) && !same(n,n+1);
+    }
+  `), true);
+});
 
 
 for (const [label, code] of [
