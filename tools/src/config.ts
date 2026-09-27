@@ -213,12 +213,10 @@ export function parseFileOptions(sourceText: string, source: string): ExplicitOp
   return out as ExplicitOptions;
 }
 
-/** Apply defaults and all cross-option rules after explicit layers are merged. */
+/** Fill missing options with defaults and freeze the resolved configuration. */
 export function resolveOptions(explicit: ExplicitOptions, source: string): LscOptions {
-  // There are no cross-option constraints in the registry: `string-semantics`
-  // selects the Dafny helper source by itself (DESIGN_STRINGS.md §4). Keep this
-  // as the single resolution gate for future dependent defaults and
-  // incompatibilities, before any consumer runs.
+  // Each option is independent: selecting a value for one option does not
+  // change another option's default or make its value invalid.
   void source;
   return Object.freeze({ ...DEFAULT_OPTIONS, ...explicit });
 }

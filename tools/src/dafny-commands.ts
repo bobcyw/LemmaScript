@@ -72,13 +72,12 @@ const OPTIONS_HEADER = /^\/\/ lsc options:(.*)$/m;
 const STRING_SEMANTICS = ["unicode-scalar", "javascript-utf16"];
 
 /**
- * Verifier arguments implied by a generated file's `// lsc options:` header
- * (DESIGN_STRINGS.md §5–6). Read from the artifact rather than the config, so a
- * standalone `.dfy` verifies under the model it was generated for. The char
- * mode is always pinned — a default is not a pin. Only `--unicode-char:false`
- * is deprecated in Dafny 4.11, and `--allow-deprecation` waives exactly that
- * warning; the blanket warning waiver would also un-fatal vacuity and
- * missing-{:axiom} warnings, which a verifier must keep fatal.
+ * Build verifier arguments from the generated file's `// lsc options:` header.
+ * Reading the saved string model instead of the current project config keeps
+ * verification consistent with generation, even if the config later changes.
+ * Always pass `--unicode-char` explicitly. UTF-16 mode also needs
+ * `--allow-deprecation` because Dafny 4.11 deprecates `--unicode-char:false`.
+ * Other warning categories remain fatal.
  */
 export function dafnyVerifyArgs(content: string, timeLimit?: number, extraFlags?: string): { args: string[]; error?: string } {
   let stringSemantics = "unicode-scalar";
@@ -89,7 +88,7 @@ export function dafnyVerifyArgs(content: string, timeLimit?: number, extraFlags?
     const value = eq < 0 ? "" : token.slice(eq + 1);
     if (key !== "string-semantics") continue;
     if (!STRING_SEMANTICS.includes(value)) {
-      return { args: [], error: `ERROR: unknown string-semantics '${value}' in the generated header; this lsc knows ${STRING_SEMANTICS.join(", ")} (DESIGN_STRINGS.md).` };
+      return { args: [], error: `ERROR: unknown string-semantics '${value}' in the generated header; this lsc knows ${STRING_SEMANTICS.join(", ")}.` };
     }
     stringSemantics = value;
   }
