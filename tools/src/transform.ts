@@ -2413,6 +2413,17 @@ function replaceVar(e: Expr, name: string, replacement: Expr, narrowing?: boolea
   const rec = (expr: Expr) => replaceVar(expr, name, replacement, narrowing);
   return mapExpr(e, x => {
     if (x.kind === "var" && x.name === name) return replacement;
+    // Named applications keep their callee outside the child expressions.
+    // A returned-function postcondition must substitute the callee as well.
+    // Bind an expression-valued replacement so backends can apply it without
+    // leaving a free result identifier in the generated lemma.
+    if (x.kind === "app" && x.fn === name) {
+      const args = x.args.map(rec);
+      if (replacement.kind === "var") return { ...x, fn: replacement.name, args };
+      const binder = freshName("_callee");
+      return { kind: "let", name: binder, value: replacement,
+        body: { ...x, fn: binder, args } };
+    }
     // Record spread: wrap direct variable uses in field values with Some when narrowing
     if (narrowing && x.kind === "record" && x.spread) {
       return {

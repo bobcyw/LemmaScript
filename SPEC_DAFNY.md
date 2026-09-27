@@ -52,6 +52,8 @@ lemma clamp_ensures(v: int, lo: int, hi: int)
 
 Non-pure functions become Dafny `method` declarations.
 
+For modular composition, add checked postconditions to the working Dafny function as proof additions; its callers can then use them even when the function is `opaque`. Returned-function specifications such as `forall(x: int, \result(x) === x + n)` are supported: the generated lemma binds the returned function before applying it. General application in executable expressions, such as `makeAdder(n)(x)`, still requires a local variable in the current Dafny lowering.
+
 ---
 
 ## 3. Regeneration Workflow

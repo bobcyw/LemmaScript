@@ -98,6 +98,8 @@ node tools/dist/lsc.js check --backend=fstar examples/fstarClosures.ts
 
 Sources marked `//@ backend fstar` are skipped by the other backends. Companions live beside each source: `examples/fstarClosures.ts` produces `examples/fstarClosures.fst.gen` and `.fst`. Generated baselines and working proofs follow the additions-only `gen`/`check`/`regen` workflow. See [SPEC_FSTAR.md](SPEC_FSTAR.md) for the supported model and examples, and [DESIGN_FSTAR.md](DESIGN_FSTAR.md) for the rationale and remaining work. Tested with F* 2026.09.20; Dafny remains the default.
 
+[accessPolicy.ts](examples/accessPolicy.ts) composes returned predicates into an access policy: members or invited guests may enter, but suspension overrides either permission. Its closure contracts and client guarantees verify with both `--backend=dafny` and `--backend=fstar`, without proof additions.
+
 ## Continuous Integration
 
 LemmaScript ships a **reusable GitHub Actions workflow** that regenerates your artifacts, verifies them, and fails the build if any committed generated file is out of date. Call it from your own repo's workflow:
