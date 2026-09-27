@@ -537,7 +537,7 @@ method removeTaskFromAllLists(tasks: map<ListId, seq<TaskId>>, taskId: TaskId) r
   {
     var lid := i_lid_keys[i_lid_idx];
     var lane := tasks[lid];
-    result := result[lid := Std.Collections.Seq.Filter((id: TaskId) => (id != taskId), lane)];
+    result := result[lid := Std.Collections.Seq.Filter((id: int) => (id != taskId), lane)];
     i_lid_idx := i_lid_idx + 1;
   }
   return result;

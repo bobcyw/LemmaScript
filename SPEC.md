@@ -640,6 +640,8 @@ arr.some((x) => x < 0)   // → Lean: arr.any (fun x => x < 0)
 
 Lambda bodies can be expressions (`(x) => x + 1`) or statement blocks (`(x) => { ... }`). A block body is flattened to a single expression when its control flow allows — `if`/`let`/`return` shapes and a `switch` (lowered to a `match`-expression); bodies that can't reduce (loops, bare side effects) stay as statements, which the Dafny backend rejects (its lambdas are expression-only). A record literal returned from a callback is typed by the callback's return annotation, so `(x): Out => ({ ... })` constructs `Out(...)`, not an anonymous tuple.
 
+Property-free callable interfaces in function signatures, such as `interface Predicate<A> { (a: A): boolean }`, lower to arrows using their instantiated TypeScript signature; inherited signatures are included. This supports a single non-generic call signature with required parameters. Overloads, callable objects with fields or index signatures, constructors, `this`/optional/rest parameters, and recursive callable interfaces are outside this lowering. Unannotated lambda parameters retain checker-inferred types when available.
+
 Flat object destructuring in a lambda parameter is supported, including aliases (`({ id, hidden: isHidden }) => ...`). It remains one callback parameter and lowers to immutable field bindings inside the lambda. Array patterns, nested object patterns, defaults, and rest properties are rejected during extraction with an explicit unsupported-pattern error.
 
 **filterMap.** `xs.map(x => ... | undefined).filter((x): x is T => x !== undefined)` drops the `undefined`s *and* unwraps to `seq<T>` — lowered to the proven `SeqFilterSome` preamble (a plain `Map(.value, Filter(.Some?, ...))` wouldn't verify, since `.value` is partial).

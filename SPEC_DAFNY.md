@@ -31,7 +31,7 @@ silently seeding a new `.dfy`. Lean artifacts are not affected by this option.
 
 ## 2. Pure Functions
 
-Pure TS functions become Dafny `function` declarations (no wrapper, no namespace). `requires` and `ensures` are emitted directly. If the function has `ensures`, a companion `lemma` is generated as a proof target for the LLM:
+Pure TS functions become Dafny `function` declarations (no wrapper, no namespace). `requires` is emitted on the function; source `ensures` clauses become a companion `lemma`:
 
 ```dafny
 function clamp(v: int, lo: int, hi: int): int
@@ -51,6 +51,8 @@ lemma clamp_ensures(v: int, lo: int, hi: int)
 ```
 
 Non-pure functions become Dafny `method` declarations.
+
+For modular composition, add checked postconditions to the working Dafny function as proof additions; its callers can then use them even when the function is `opaque`. Returned-function specifications such as `forall(x: int, \result(x) === x + n)` are supported: the generated lemma binds the returned function before applying it. General application in executable expressions, such as `makeAdder(n)(x)`, still requires a local variable in the current Dafny lowering.
 
 ---
 
@@ -129,4 +131,3 @@ The Dafny emitter auto-injects helper functions when needed. Each is emitted at 
 Standard libraries are auto-detected: if `foo.dfy` contains `import Std.`, the `--standard-libraries` flag is added.
 
 The shared `--time-limit=<seconds>` flag (SPEC.md §7) maps to Dafny's `--verification-time-limit`; `--extra-flags=<string>` is forwarded verbatim to `dafny verify`.
-
