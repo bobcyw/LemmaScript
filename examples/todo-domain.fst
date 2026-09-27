@@ -705,7 +705,7 @@ let v_removeTaskFromAllLists  (v_tasks:(FM.map v_ListId (S.seq v_TaskId))) (v_ta
     if (v__5f_lid_5f_idx_168 < (S.length (v__5f_lid_5f_keys_163))) then (
       let v_lid_169 : v_ListId = (S.index (v__5f_lid_5f_keys_163) (v__5f_lid_5f_idx_168)) in
       let v_lane_170 : (S.seq v_TaskId) = (FM.lookup (v_lid_169) (v_tasks)) in
-      let v_result_171 : (FM.map int (S.seq int)) = (FM.insert (v_lid_169) ((R.filter ((fun (v_id:int) ->
+      let v_result_171 : (FM.map int (S.seq int)) = (FM.insert (v_lid_169) ((R.filter ((fun (v_id:v_TaskId) ->
         (R.decide ((v_id =!= v_taskId))))) (v_lane_170))) (v_result_167)) in
       let v__5f_lid_5f_idx_173 : int = (v__5f_lid_5f_idx_168 + (1)) in
       (ls_loop_165 (v_result_171) (v__5f_lid_5f_idx_173))

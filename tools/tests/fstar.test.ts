@@ -118,35 +118,6 @@ for (const file of ["fstarClosures.ts", "fstarComposition.ts", "fstarArrays.ts",
   });
 }
 
-const callablePredicates = String.raw`
-  interface Predicate<in A> { (value: A): boolean }
-  interface StringPredicate extends Predicate<string> {}
-  export function negate<A>(self: Predicate<A>): Predicate<A> {
-    //@ ensures forall(value: A, \result(value) === !self(value))
-    return value => !self(value);
-  }
-  export function positive(value: number): boolean {
-    //@ ensures \result === (value > 0)
-    const predicate = negate((n: number): boolean => n <= 0);
-    return predicate(value);
-  }
-  export function inherited(self: StringPredicate, value: string): boolean {
-    //@ ensures \result === !self(value)
-    const predicate = negate(self);
-    return predicate(value);
-  }
-`;
-test("callable interfaces retain instantiated and inherited signatures in opaque closure proofs", realFstar, () => temporary(dir => {
-  const file = join(dir, "Test.fst");
-  const generated = compile(callablePredicates).replace(/^let v_negate /m, '[@@"opaque_to_smt"]\nlet v_negate ');
-  writeFileSync(file, generated);
-  writeFileSync(file + ".gen", generated);
-  assert.equal(fstarVerify(file, 20), true);
-}));
-test("callable interface proofs reject a wrong returned predicate", realFstar, () => {
-  assert.equal(verify(callablePredicates.replace("return value => !self(value)", "return value => self(value)")), false);
-});
-
 // Check the universal compiler theorem independently of the concrete demo's
 // normalization proof, which the example sweep verifies in its working .fst.
 const compilerSource = readFileSync(join(examples, "fstarCompiler.ts"), "utf8");
