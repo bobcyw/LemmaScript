@@ -205,7 +205,7 @@ function isEmptyResult(result: string): boolean {
 
 If no function in the file has `//@ verify`, all functions are extracted as before. This keeps existing LemmaScript projects (where every function is in-fragment) working without changes.
 
-Function declarations inside function-only TypeScript namespaces participate in the same selection. They are flattened to unique names, and static qualified source calls resolve through their declaration symbols. Nested namespaces are supported; colliding names, namespace state, other namespace members, and ambient namespaces are rejected.
+Function declarations inside function-only TypeScript namespaces participate in the same selection. They are flattened to unique names, and static qualified source calls resolve through their declaration symbols. Nested namespaces are supported. Namespaces containing only type aliases/interfaces are ignored, including ambient ones; colliding function names, namespace state, and ambient value declarations are rejected.
 
 ### 2.7 Backend Restriction: `//@ backend`
 

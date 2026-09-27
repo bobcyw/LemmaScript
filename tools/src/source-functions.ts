@@ -1,5 +1,17 @@
 import { Node, type FunctionDeclaration, type SourceFile } from "ts-morph";
 
+/** Type-only namespaces have no runtime initialization to model. Ambient
+ * value/function declarations are deliberately not included in this case. */
+function typeOnlyNamespace(node: Node): boolean {
+  if (Node.isModuleDeclaration(node)) {
+    const body = node.getBody();
+    return !!body && typeOnlyNamespace(body);
+  }
+  return Node.isModuleBlock(node) && node.getStatements().every(stmt =>
+    Node.isTypeAliasDeclaration(stmt) || Node.isInterfaceDeclaration(stmt)
+    || Node.isEmptyStatement(stmt) || (Node.isModuleDeclaration(stmt) && typeOnlyNamespace(stmt)));
+}
+
 /** Function-only namespaces are flattened to unambiguous declaration names.
  * Keep the original nodes: symbol resolution and source safety checks must see
  * the original scopes. Namespace state and colliding names need a richer IR.
@@ -23,6 +35,7 @@ export function sourceFunctions(source: SourceFile): FunctionDeclaration[] {
   function visit(node: Node): void {
     if (Node.isModuleDeclaration(node)) {
       if (node.getLeadingCommentRanges().some(c => /^\/\/@\s+skip\b/.test(c.getText().trim()))) return;
+      if (typeOnlyNamespace(node)) return;
       if (!Node.isIdentifier(node.getNameNode()) || node.hasDeclareKeyword()) {
         throw new Error("Only non-ambient function-only namespaces are supported");
       }
