@@ -99,6 +99,7 @@ interface Ctx {
   pureFns: Set<string>;  // names of pure functions in this module
   fnParams: Map<string, Ty[]>;  // function name → parameter types
   fnReturns: Map<string, Ty>;  // function name → return type
+  fnTypeParams?: Map<string, string[]>;
   externs: Map<string, ExternSignature>;  // qualified name → declared signature (from `//@ extern`)
   inSpec: boolean;
   inLambda: boolean;
@@ -195,7 +196,60 @@ function coerceToTargetTy(value: TExpr, targetTy: Ty, typeDecls: TypeDeclInfo[])
       }
     }
   }
-  return value;
+  return widenTaggedValue(value, targetTy, typeDecls) ?? value;
+}
+
+/** Realize a structural tagged-union widening in the nominal value model.
+ * Every source tag and field must survive, including inside instantiated
+ * union payloads and callback results. No alias expansion or general TS
+ * subtyping is performed here; recursive conversions are left unsupported. */
+let widenCounter = 0;
+function widenTaggedValue(value: TExpr, targetTy: Ty, decls: TypeDeclInfo[], seen = new Set<string>()): TExpr | undefined {
+  if (tyEqual(value.ty, targetTy)) return value;
+  const key = `${tyToCanonical(value.ty)} -> ${tyToCanonical(targetTy)}`;
+  if (seen.has(key)) return undefined;
+  seen = new Set([...seen, key]);
+  const bind = (input: TExpr, name: string, body: TExpr): TExpr => ({
+    kind: "call", args: [input], ty: body.ty, callKind: "pure", valueBinding: true,
+    fn: { kind: "lambda", params: [{ name, ty: input.ty }], body: [{ kind: "return", value: body }],
+      ty: { kind: "fn", params: [input.ty], result: body.ty } },
+  });
+  if (value.ty.kind === "fn" && targetTy.kind === "fn" &&
+      value.ty.params.length === targetTy.params.length &&
+      value.ty.params.every((p, i) => tyEqual(p, targetTy.params[i]))) {
+    const name = freshName(`_widenCallback${widenCounter++}`);
+    const fn: TExpr = { kind: "var", name, ty: value.ty };
+    const params = value.ty.params.map(ty => ({ name: freshName(`_widenArg${widenCounter++}`), ty }));
+    const call: TExpr = { kind: "call", fn, args: params.map(p => ({ kind: "var", ...p })),
+      ty: value.ty.result, callKind: "pure" };
+    const widened = widenTaggedValue(call, targetTy.result, decls, seen);
+    if (!widened) return undefined;
+    return bind(value, name, { kind: "lambda", params, body: [{ kind: "return", value: widened }], ty: targetTy });
+  }
+  const source = declOfTy(decls, value.ty), target = declOfTy(decls, targetTy);
+  if (value.ty.kind !== "user" || targetTy.kind !== "user" ||
+      source?.kind !== "discriminated-union" || target?.kind !== "discriminated-union" ||
+      source.discriminant !== target.discriminant || !source.variants || !target.variants) return undefined;
+  const name = freshName(`_widenValue${widenCounter++}`);
+  const scrutinee: TExpr = { kind: "var", name, ty: value.ty };
+  const cases: { variant: string; body: TExpr }[] = [];
+  for (const variant of source.variants) {
+    const destination = target.variants.find(v => v.name === variant.name);
+    if (!destination || variant.fields.length !== destination.fields.length) return undefined;
+    const fields: { name: string; value: TExpr }[] = [{ name: target.discriminant!,
+      value: { kind: "str", value: variant.name, ty: { kind: "string" } } }];
+    for (const field of variant.fields) {
+      const dest = destination.fields.find(f => f.name === field.name);
+      if (!dest) return undefined;
+      const payload: TExpr = { kind: "field", obj: scrutinee, field: field.name, ofVariant: variant.name,
+        ty: instantiatedFieldTy(field.type!, value.ty, source) };
+      const converted = widenTaggedValue(payload, instantiatedFieldTy(dest.type!, targetTy, target), decls, seen);
+      if (!converted) return undefined;
+      fields.push({ name: field.name, value: converted });
+    }
+    cases.push({ variant: variant.name, body: { kind: "record", spread: null, fields, ty: targetTy } });
+  }
+  return bind(value, name, { kind: "tagMatch", scrutinee, typeName: source.name, cases, fallthrough: null, ty: targetTy });
 }
 
 /** A negated presence check on a bare var (`v === undefined` / `!v`), via
@@ -595,11 +649,14 @@ function isDefinedCheckRawLambda(raw: RawExpr): boolean {
 }
 
 /** Coerce call arguments to their declared parameter slots and pad missing optional args. */
-function coerceCallArgs(args: TExpr[], fn: TExpr, ctx: Ctx): TExpr[] {
+function coerceCallArgs(args: TExpr[], fn: TExpr, ctx: Ctx, instantiatedParams?: Ty[]): TExpr[] {
   if (fn.kind !== "var" || !ctx.fnParams.has(fn.name)) return args;
-  const paramTys = ctx.fnParams.get(fn.name)!;
+  const paramTys = instantiatedParams ?? ctx.fnParams.get(fn.name)!;
   args = args.map((a, i) => {
     if (i >= paramTys.length) return a;
+    if (paramTys[i].kind === "fn" && a.kind === "var" && a.ty.kind === "unknown" && ctx.fnParams.has(a.name)) {
+      a = { ...a, ty: { kind: "fn", params: ctx.fnParams.get(a.name)!, result: ctx.fnReturns.get(a.name)! } };
+    }
     return coerceToTargetTy(a, paramTys[i], ctx.typeDecls);
   });
   // Pad missing optional args with None
@@ -906,7 +963,10 @@ function resolveExpr(e: RawExpr, ctx: Ctx, returnedType?: Ty): TExpr {
       }
       // Propagate parameter types to arguments for record literal resolution
       // (enables inline discriminated union construction in function arguments)
-      const paramTypes = fn.kind === "var" && ctx.fnParams.has(fn.name) ? ctx.fnParams.get(fn.name)! : null;
+      const typeParams = fn.kind === "var" && !lookup(ctx.env, fn.name) ? ctx.fnTypeParams?.get(fn.name) : undefined;
+      const bindings = new Map(typeParams?.flatMap((p, i) => e.typeArgs?.[i] ? [[p, parseTsType(e.typeArgs[i])] as const] : []));
+      const instantiate = (ty: Ty): Ty => bindings.size ? substituteTypeParams(ty, bindings) : ty;
+      const paramTypes = fn.kind === "var" && ctx.fnParams.has(fn.name) ? ctx.fnParams.get(fn.name)!.map(instantiate) : null;
       let args = coerceCallArgs(rawArgs.map((a, i) => {
         let aCtx = argCtx;
         if (paramTypes && i < paramTypes.length &&
@@ -914,7 +974,7 @@ function resolveExpr(e: RawExpr, ctx: Ctx, returnedType?: Ty): TExpr {
           aCtx = { ...aCtx, returnTy: paramTypes[i] };
         }
         return resolveExpr(a, aCtx);
-      }), fn, ctx);
+      }), fn, ctx, paramTypes ?? undefined);
       // Array method `.with(i, v)`: coerce the value arg to the element type
       // so `arr[i] = v` on `(T|null)[]` wraps `T` → `Some(T)` (and similarly
       // for synth array-unions). Same shape as the record-field coercion
@@ -925,7 +985,7 @@ function resolveExpr(e: RawExpr, ctx: Ctx, returnedType?: Ty): TExpr {
       let ty = inferMethodReturnTy(fn, args, ctx);
       // For same-file function calls, use the known return type
       if (ty.kind === "unknown" && fn.kind === "var" && ctx.fnReturns.has(fn.name)) {
-        ty = ctx.fnReturns.get(fn.name)!;
+        ty = instantiate(ctx.fnReturns.get(fn.name)!);
       }
       // Call through a function-typed value: its fn type carries the result
       if (ty.kind === "unknown" && fn.ty.kind === "fn") ty = fn.ty.result;
@@ -1735,7 +1795,7 @@ function resolveFunction(
   fnParams: Map<string, Ty[]> = new Map(), fnReturns: Map<string, Ty> = new Map(),
   externs: Map<string, ExternSignature> = new Map(),
   moduleConstants: Map<string, Ty> = new Map(),
-  opts?: { thisBinding?: { name: string; ty: Ty }; forcePure?: boolean }
+  opts?: { thisBinding?: { name: string; ty: Ty }; forcePure?: boolean; fnTypeParams?: Map<string, string[]> }
 ): TFunction {
 
   const overrides = new Map(fn.typeAnnotations.map(a => [a.name, a.type]));
@@ -1749,7 +1809,7 @@ function resolveFunction(
   if (opts?.thisBinding) env = extend(env, opts.thisBinding.name, opts.thisBinding.ty);
   for (const p of params) env = extend(env, p.name, p.ty);
 
-  const baseCtx: Ctx = { env, typeDecls, overrides, allowResult: false, returnTy, pureFns, fnParams, fnReturns, externs, inSpec: false, inLambda: false, narrowedPaths: [], narrowedIndices: [] };
+  const baseCtx: Ctx = { env, typeDecls, overrides, allowResult: false, returnTy, pureFns, fnParams, fnReturns, fnTypeParams: opts?.fnTypeParams, externs, inSpec: false, inLambda: false, narrowedPaths: [], narrowedIndices: [] };
   const requiresCtx: Ctx = { ...baseCtx, inSpec: true };
   const ensuresCtx: Ctx = { ...baseCtx, env: extend(env, "\\result", returnTy), allowResult: true, inSpec: true };
 
@@ -1780,7 +1840,7 @@ function resolveFunction(
   };
 }
 
-function resolveClass(cls: import("./rawir.js").RawClass, typeDecls: TypeDeclInfo[], pureFns: Set<string>, fnParams: Map<string, Ty[]> = new Map(), fnReturns: Map<string, Ty> = new Map(), externs: Map<string, ExternSignature> = new Map(), moduleConstants: Map<string, Ty> = new Map()): import("./typedir.js").TClass {
+function resolveClass(cls: import("./rawir.js").RawClass, typeDecls: TypeDeclInfo[], pureFns: Set<string>, fnParams: Map<string, Ty[]> = new Map(), fnReturns: Map<string, Ty> = new Map(), externs: Map<string, ExternSignature> = new Map(), moduleConstants: Map<string, Ty> = new Map(), fnTypeParams: Map<string, string[]> = new Map()): import("./typedir.js").TClass {
   const fields = cls.fields.map(f => ({ name: f.name, ty: parseTsType(f.tsType) }));
   // Create a synthetic record type for 'this' so field access resolves
   const thisType: Ty = { kind: "user", name: cls.name };
@@ -1790,6 +1850,7 @@ function resolveClass(cls: import("./rawir.js").RawClass, typeDecls: TypeDeclInf
   const methods = cls.methods.map(fn =>
     resolveFunction(fn, allTypeDecls, pureFns, fnParams, fnReturns, externs, moduleConstants, {
       thisBinding: { name: "this", ty: thisType },
+      fnTypeParams,
       forcePure: false,  // class methods are never pure (they access this)
     })
   );
@@ -1819,11 +1880,13 @@ function precomputeFieldTypesInner(typeDecls: TypeDeclInfo[]) {
 
 export function resolveModule(raw: RawModule): TModule {
   _warnedRefEq.clear();
+  widenCounter = 0;
   precomputeFieldTypes(raw.typeDecls);
   const pureFns = computePureFns(raw.functions, raw.externs ?? []);
   // Pre-compute function parameter and return types
   const fnParams = new Map<string, Ty[]>();
   const fnReturns = new Map<string, Ty>();
+  const fnTypeParams = new Map(raw.functions.map(fn => [fn.name, fn.typeArgNames ?? fn.typeParams]));
   for (const fn of raw.functions) {
     const overrides = new Map(fn.typeAnnotations.map(a => [a.name, a.type]));
     fnParams.set(fn.name, fn.params.map(p => expandAlias(resolveTsType(p.tsType, overrides, p.name), raw.typeDecls)));
@@ -1851,7 +1914,7 @@ export function resolveModule(raw: RawModule): TModule {
     for (let i = 0; i < ext.params.length; i++) {
       env = extend(env, ext.params[i].name, sig.params[i]);
     }
-    const baseCtx: Ctx = { env, typeDecls: raw.typeDecls, overrides: new Map(), allowResult: false, returnTy: sig.returnTy, pureFns, fnParams, fnReturns, externs, inSpec: true, inLambda: false, narrowedPaths: [], narrowedIndices: [] };
+    const baseCtx: Ctx = { env, typeDecls: raw.typeDecls, overrides: new Map(), allowResult: false, returnTy: sig.returnTy, pureFns, fnParams, fnReturns, fnTypeParams, externs, inSpec: true, inLambda: false, narrowedPaths: [], narrowedIndices: [] };
     const ensuresCtx: Ctx = { ...baseCtx, env: extend(env, "\\result", sig.returnTy), allowResult: true };
     const requires = ext.requires.map(s => {
       try { return resolveSpec(s, baseCtx); } catch { return null; }
@@ -1870,7 +1933,7 @@ export function resolveModule(raw: RawModule): TModule {
       impure: ext.impure,
     };
   });
-  const emptyCtx: Ctx = { env: null, typeDecls: raw.typeDecls, overrides: new Map(), allowResult: false, returnTy: { kind: "int" }, pureFns, fnParams, fnReturns, externs, inSpec: false, inLambda: false, narrowedPaths: [], narrowedIndices: [] };
+  const emptyCtx: Ctx = { env: null, typeDecls: raw.typeDecls, overrides: new Map(), allowResult: false, returnTy: { kind: "int" }, pureFns, fnParams, fnReturns, fnTypeParams, externs, inSpec: false, inLambda: false, narrowedPaths: [], narrowedIndices: [] };
   const constants = (raw.constants ?? []).map(c => {
     const ty = expandAlias(parseTsType(c.tsType), raw.typeDecls);
     // Propagate the declared type into the value's resolution context so that
@@ -1887,7 +1950,7 @@ export function resolveModule(raw: RawModule): TModule {
     typeDecls: raw.typeDecls,
     externs: tExterns,
     constants,
-    functions: raw.functions.map(fn => resolveFunction(fn, raw.typeDecls, pureFns, fnParams, fnReturns, externs, moduleConstants)),
-    classes: (raw.classes ?? []).map(cls => resolveClass(cls, raw.typeDecls, pureFns, fnParams, fnReturns, externs, moduleConstants)),
+    functions: raw.functions.map(fn => resolveFunction(fn, raw.typeDecls, pureFns, fnParams, fnReturns, externs, moduleConstants, { fnTypeParams })),
+    classes: (raw.classes ?? []).map(cls => resolveClass(cls, raw.typeDecls, pureFns, fnParams, fnReturns, externs, moduleConstants, fnTypeParams)),
   };
 }

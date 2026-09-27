@@ -6,7 +6,7 @@ import type { Ty, TModule } from "./typedir.js";
 import type { Decl, Expr, Stmt, Param, MatchPattern, FnDef, FnMethod, FnDefByMethod, ExternDecl } from "./ir.js";
 import { exactIntegerLiteral, anyExpr, anyExprInStmts } from "./ir.js";
 import { transformModuleFstar } from "./transform.js";
-import { parseTsType } from "./types.js";
+import { parseTsType, substituteTypeParams, typeApplication } from "./types.js";
 
 export function fstarName(s: string): string {
   return "v_" + [...s].map(c => /[A-Za-z0-9]/.test(c) ? c : `_${c.codePointAt(0)!.toString(16)}_`).join("");
@@ -175,7 +175,11 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
     if(t.kind==="optional")fields=[{name:"value",type:t.inner}];
     if(t.kind==="user"){
       parent=parts(t.name)[0];const d=data.get(parent);
-      if(d?.kind==="inductive")fields=d.constructors.find(x=>x.name===p.ctor)?.fields??[];
+      if(d?.kind==="inductive"){
+        const args=typeApplication(t.name)?.args??[];
+        const bindings=new Map((d.typeParams??[]).flatMap((p,i)=>args[i]?[[p,args[i]] as const]:[]));
+        fields=(d.constructors.find(x=>x.name===p.ctor)?.fields??[]).map(f=>({...f,type:substituteTypeParams(f.type,bindings)}));
+      }
     }
     let cc=c;
     for(let i=0;i<p.binders.length;i++)cc=bind(cc,p.binders[i],fields[i]?.type??unknown);

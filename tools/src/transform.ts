@@ -801,6 +801,12 @@ function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
     }
 
     case "call": {
+      // Tagged-union widening binds the source once before matching it.
+      if (e.valueBinding && e.fn.kind === "lambda" && e.fn.params.length === 1 && e.args.length === 1 &&
+          e.fn.body.length === 1 && e.fn.body[0].kind === "return") {
+        return { kind: "let", name: e.fn.params[0].name, value: lowerExpr(e.args[0], binds),
+          body: lowerExpr(e.fn.body[0].value, binds) };
+      }
       // Array.isArray(x) on a synth array-union (discriminant "__isArray__")
       // → constructor predicate `x.ArrayBranch?`. Used in spec ensures and
       // anywhere `Array.isArray` escapes the narrowing rule (narrow rewrites

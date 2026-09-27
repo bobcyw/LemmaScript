@@ -102,6 +102,8 @@ Sources marked `//@ backend fstar` are skipped by the other backends. Companions
 
 [resultPipeline.ts](examples/resultPipeline.ts) uses generic `Result` values, `map`, and `flatMap` to validate an order and compute its total. Both backends prove that the first error wins, success requires valid quantity and price, and the total is their product; no proof additions are needed.
 
+[resultTypedErrors.ts](examples/resultTypedErrors.ts) gives the two validators distinct tagged error types and combines them into `QuantityError | PriceError`, preserving the error tag and original quantity or price. F* verifies without proof additions; Dafny uses two calls to the validators' proved lemmas.
+
 ## Continuous Integration
 
 LemmaScript ships a **reusable GitHub Actions workflow** that regenerates your artifacts, verifies them, and fails the build if any committed generated file is out of date. Call it from your own repo's workflow:

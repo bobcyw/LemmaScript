@@ -492,7 +492,8 @@ function extractExpr(node: Expression): RawExpr {
     if (fn.kind === "optChain") {
       return { ...fn, chain: [...fn.chain, { kind: "call", args }] };
     }
-    return { kind: "call", fn, args };
+    const typeArgs = node.getTypeArguments().map(t => _eraseGenerics(t.getText()));
+    return { kind: "call", fn, args, ...(typeArgs.length ? { typeArgs } : {}) };
   }
 
   // Binary expression: a + b, a === b, etc.
@@ -1981,6 +1982,7 @@ function extractFunctionInner(fn: FunctionDeclaration, parentAnnotations?: Annot
     name: (fn as any).getName?.() ?? "<anonymous>",
     exported: false,  // set in extractModule against the source file's export surface
     typeParams,
+    ...(fn.getTypeParameters?.().length ? { typeArgNames: fn.getTypeParameters().map(tp => tp.getName()) } : {}),
     // Original TS parameter grouping, before the flatten below loses it. `defaults` carries
     // each bound name's default initializer text (omitted when none) for TS-targeting consumers.
     tsParams: fn.getParameters().map(p => {
