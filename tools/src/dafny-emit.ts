@@ -1623,6 +1623,7 @@ function translatePattern(p: MatchPattern): string {
 export function emitDafnyFile(file: Module, tsFileName?: string, options: LscOptions = DEFAULT_OPTIONS): string {
   _useSafeSlice = options["safe-slice"];
   _stringSemantics = options["string-semantics"];
+  // Reset before scanning types, including when the previous file failed to emit.
   _usesStrings = false;
   resetDafnyNameCache();
   buildRecordCtorMap(file.decls);
