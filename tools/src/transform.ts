@@ -1856,7 +1856,7 @@ function buildMatchArms<T>(
   varName: string | undefined, typeName: string, typeDecls: TypeDeclInfo[],
   transformBody: (body: TStmt[], varName: string | undefined, fields: { name: string; tsType: string }[], ctorName?: string) => T | null
 ): { pattern: MatchPattern; body: T }[] | null {
-  const decl = declOf(typeDecls, typeName);
+  const decl = declOf(typeDecls, tyBaseName(typeName));
   if (!decl || (decl.kind !== "string-union" && decl.kind !== "discriminated-union")) {
     throw new Error(`match type ${typeName} is not a declared union`);
   }

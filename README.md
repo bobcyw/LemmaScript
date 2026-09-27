@@ -100,6 +100,8 @@ Sources marked `//@ backend fstar` are skipped by the other backends. Companions
 
 [accessPolicy.ts](examples/accessPolicy.ts) composes returned predicates into an access policy: members or invited guests may enter, but suspension overrides either permission. Its closure contracts and client guarantees verify with both `--backend=dafny` and `--backend=fstar`, without proof additions.
 
+[resultPipeline.ts](examples/resultPipeline.ts) uses generic `Result` values, `map`, and `flatMap` to validate an order and compute its total. Both backends prove that the first error wins, success requires valid quantity and price, and the total is their product; no proof additions are needed.
+
 ## Continuous Integration
 
 LemmaScript ships a **reusable GitHub Actions workflow** that regenerates your artifacts, verifies them, and fails the build if any committed generated file is out of date. Call it from your own repo's workflow:

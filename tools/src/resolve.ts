@@ -8,7 +8,7 @@
 import type { RawExpr, RawStmt, RawFunction, RawModule } from "./rawir.js";
 import type { Ty, TExpr, TStmt, TFunction, TModule, TParam, CallKind } from "./typedir.js";
 import { isBigInt, tyEqual, isTerminatorKind } from "./typedir.js";
-import { parseTsType, tyToCanonical } from "./types.js";
+import { parseTsType, substituteTypeParams, typeApplication, tyToCanonical } from "./types.js";
 import type { TypeDeclInfo } from "./types.js";
 import { parseExpr } from "./specparser.js";
 import { freshName } from "./names.js";
@@ -139,12 +139,12 @@ function conditionalResultTy(thenTy: Ty, elseTy: Ty): Ty {
 /** Contextually type string literals as constructors. Ternary branches inherit
  *  the ternary's target, and an optional target contributes its payload type —
  *  the caller adds the Some wrapper only after the payload has been coerced. */
-function coerceStr(expr: TExpr, targetTy: Ty): TExpr {
+function coerceStr(expr: TExpr, targetTy: Ty, typeDecls: TypeDeclInfo[]): TExpr {
   const payloadTy = targetTy.kind === "optional" ? targetTy.inner : targetTy;
-  if (expr.kind === "str" && payloadTy.kind === "user") return { ...expr, ty: payloadTy };
+  if (expr.kind === "str" && declOfTy(typeDecls, payloadTy)?.kind === "string-union") return { ...expr, ty: payloadTy };
   if (expr.kind === "conditional") {
-    const then_ = coerceStr(expr.then, payloadTy);
-    const else_ = coerceStr(expr.else, payloadTy);
+    const then_ = coerceStr(expr.then, payloadTy, typeDecls);
+    const else_ = coerceStr(expr.else, payloadTy, typeDecls);
     return { ...expr, then: then_, else: else_, ty: conditionalResultTy(then_.ty, else_.ty) };
   }
   return expr;
@@ -175,7 +175,7 @@ function findSynthArrayUnion(name: string, typeDecls: TypeDeclInfo[]): TypeDeclI
  *  Returns `value` unchanged if no coercion applies (types already match,
  *  source is unknown, or no rule matches). */
 function coerceToTargetTy(value: TExpr, targetTy: Ty, typeDecls: TypeDeclInfo[]): TExpr {
-  value = coerceStr(value, targetTy);
+  value = coerceStr(value, targetTy, typeDecls);
   if (value.ty.kind === "unknown" || value.ty.kind === "void") return value;
   if (targetTy.kind === "optional" && value.ty.kind !== "optional") {
     return wrapSome(value, targetTy);
@@ -638,6 +638,13 @@ function inferMethodReturnTy(fn: TExpr, args: TExpr[], ctx: Ctx): Ty {
   return { kind: "unknown" };
 }
 
+function instantiatedFieldTy(type: Ty, objTy: Ty, decl: TypeDeclInfo | undefined): Ty {
+  if (objTy.kind !== "user" || !decl?.typeParams?.length) return type;
+  const app = typeApplication(objTy.name);
+  const bindings = new Map(decl.typeParams.flatMap((p, i) => app?.args[i] ? [[p, app.args[i]] as const] : []));
+  return bindings.size ? substituteTypeParams(type, bindings) : type;
+}
+
 /** Look up the type of `field` on `objTy`. Returns `unknown` if not found. */
 function lookupFieldTy(objTy: Ty, field: string, ctx: Ctx): { ty: Ty; isDiscriminant: boolean } {
   if (field === "length" && (objTy.kind === "array" || objTy.kind === "string")) {
@@ -652,12 +659,12 @@ function lookupFieldTy(objTy: Ty, field: string, ctx: Ctx): { ty: Ty; isDiscrimi
     const decl = findDecl(ctx, baseTyName);
     if (decl?.kind === "record") {
       const f = decl.fields?.find(f => f.name === field);
-      if (f) return { ty: f.type!, isDiscriminant };
+      if (f) return { ty: instantiatedFieldTy(f.type!, objTy, decl), isDiscriminant };
     }
     if (decl?.kind === "discriminated-union" && decl.variants) {
       for (const variant of decl.variants) {
         const f = variant.fields.find(f => f.name === field);
-        if (f) return { ty: f.type!, isDiscriminant };
+        if (f) return { ty: instantiatedFieldTy(f.type!, objTy, decl), isDiscriminant };
       }
     }
     return { ty: { kind: "unknown" }, isDiscriminant };
@@ -807,8 +814,8 @@ function resolveExpr(e: RawExpr, ctx: Ctx, returnedType?: Ty): TExpr {
       }
       let right = resolveExpr(rawRight, rightCtx);
       if (e.op === "===" || e.op === "!==") {
-        left = coerceStr(left, right.ty);
-        right = coerceStr(right, left.ty);
+        left = coerceStr(left, right.ty, ctx.typeDecls);
+        right = coerceStr(right, left.ty, ctx.typeDecls);
         // Spec (`//@`) comparisons are proof-only, so they can't diverge at
         // runtime; only warn on executable code.
         if (!ctx.inSpec && refEqHazard(left.ty, ctx.typeDecls) && refEqHazard(right.ty, ctx.typeDecls)) {
@@ -997,7 +1004,7 @@ function resolveExpr(e: RawExpr, ctx: Ctx, returnedType?: Ty): TExpr {
         if (np?.variant) {
           const decl = findDecl(ctx, tyBaseName(obj.ty.name));
           const f = decl?.variants?.find(v => v.name === np.variant)?.fields.find(f => f.name === e.field);
-          if (f?.type) { ty = f.type; ofVariant = np.variant; }
+          if (f?.type) { ty = instantiatedFieldTy(f.type, obj.ty, decl); ofVariant = np.variant; }
         }
       }
 
@@ -1269,8 +1276,8 @@ function resolveExpr(e: RawExpr, ctx: Ctx, returnedType?: Ty): TExpr {
 
       let then_ = resolveExpr(e.then, thenCtx, returnedType);
       let else_ = resolveExpr(e.else, elseCtx, returnedType);
-      then_ = coerceStr(then_, else_.ty);
-      else_ = coerceStr(else_, then_.ty);
+      then_ = coerceStr(then_, else_.ty, ctx.typeDecls);
+      else_ = coerceStr(else_, then_.ty, ctx.typeDecls);
       const ty = conditionalResultTy(then_.ty, else_.ty);
       return { kind: "conditional", cond, then: then_, else: else_, ty };
     }
@@ -1375,7 +1382,7 @@ function resolveStmt(s: RawStmt, ctx: Ctx): [TStmt, Env | null] {
       // one optional level when consulting returnTy.
       const initCtx = (declTy.kind === "user" || declTy.kind === "array" || declTy.kind === "optional")
         ? { ...ctx, returnTy: declTy } : ctx;
-      let init = coerceStr(resolveExpr(s.init, initCtx), declTy);
+      let init = coerceStr(resolveExpr(s.init, initCtx), declTy, ctx.typeDecls);
       // Under noUncheckedIndexedAccess, TS gives `const e = arr[i]` type T | undefined
       // while the index expression itself resolves to T. Leave that mismatch intact:
       // narrow.ts's ruleOptionalIndexBinding adds the runtime bounds guard and the
