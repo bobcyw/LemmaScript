@@ -35,8 +35,8 @@ lemma accessPolicy_ensures<A>(primary: (A) -> bool, fallback: (A) -> bool, denie
 
 function canEnter(request: AccessRequest): bool
 {
-  var policy := accessPolicy((candidate: AccessRequest) => candidate.member, (candidate: AccessRequest) => candidate.invited, (candidate: AccessRequest) => candidate.suspended);
-  policy(request)
+  var i_callee := accessPolicy((candidate: AccessRequest) => candidate.member, (candidate: AccessRequest) => candidate.invited, (candidate: AccessRequest) => candidate.suspended);
+  i_callee(request)
 }
 
 lemma canEnter_ensures(request: AccessRequest)

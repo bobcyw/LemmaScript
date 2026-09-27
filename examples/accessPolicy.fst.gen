@@ -57,11 +57,10 @@ let v_canEnter  (v_request:v_AccessRequest)
       (ensures (fun ls_result ->
         (ls_result == (((v_request).f_v_AccessRequest_v_member || (v_request).f_v_AccessRequest_v_invited) && (not (v_request).f_v_AccessRequest_v_suspended)))
       )) =
-  (let v_policy_18 = (v_accessPolicy ((fun (v_candidate:v_AccessRequest) ->
+  ((v_accessPolicy ((fun (v_candidate:v_AccessRequest) ->
     (v_candidate).f_v_AccessRequest_v_member)) ((fun (v_candidate:v_AccessRequest) ->
     (v_candidate).f_v_AccessRequest_v_invited)) ((fun (v_candidate:v_AccessRequest) ->
-    (v_candidate).f_v_AccessRequest_v_suspended))) in
-  (v_policy_18 (v_request)))
+    (v_candidate).f_v_AccessRequest_v_suspended))) (v_request))
 
 let v_suspendedCannotEnter  (v_request:v_AccessRequest)
   : Ghost bool

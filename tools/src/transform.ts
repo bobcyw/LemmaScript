@@ -924,6 +924,13 @@ function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
       if (e.fn.kind !== "var" && _opts.nativeContracts) {
         return { kind: "app", fn: "__fstarApply", args: [lowerExpr(e.fn, binds), ...e.args.map(a => lowerExpr(a, binds))] };
       }
+      if (e.fn.kind !== "var" && _opts.backend === "dafny" && e.fn.ty.kind === "fn") {
+        // Applying a returned/selected function uses the same named-call IR as
+        // a source local, evaluating the callee once before its arguments.
+        const callee = freshName("_callee");
+        return { kind: "let", name: callee, value: lowerExpr(e.fn, binds),
+          body: { kind: "app", fn: callee, args: e.args.map(a => lowerExpr(a, binds)) } };
+      }
       if (e.fn.kind !== "var")
         throw new Error(`Unsupported call expression: ${e.fn.kind}`);
       const prefix = e.callKind === "spec-pure" && _opts.backend === "lean" ? "Pure." : "";

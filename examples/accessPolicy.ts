@@ -34,12 +34,11 @@ export interface AccessRequest {
 // Members and invited guests may enter unless their account is suspended.
 export function canEnter(request: AccessRequest): boolean {
   //@ ensures \result === ((request.member || request.invited) && !request.suspended)
-  const policy = accessPolicy(
+  return accessPolicy(
     (candidate: AccessRequest): boolean => candidate.member,
     (candidate: AccessRequest): boolean => candidate.invited,
     (candidate: AccessRequest): boolean => candidate.suspended,
-  );
-  return policy(request);
+  )(request);
 }
 
 export function suspendedCannotEnter(request: AccessRequest): boolean {
