@@ -410,8 +410,8 @@ function expandAlias(ty: Ty, typeDecls: TypeDeclInfo[], seen: Set<string> = new 
   return ty;
 }
 
-/** Resolve a callable alias at a call site without erasing named types from
- * declarations. This also supplies the callback's purity and result type. */
+/** Resolve a callable alias in the existing pure function-value model while
+ * preserving named declarations. This does not establish TypeScript purity. */
 function functionType(ty: Ty | undefined, typeDecls: TypeDeclInfo[], seen = new Set<string>()): Extract<Ty, { kind: "fn" }> | undefined {
   if (ty?.kind === "fn") return ty;
   if (ty?.kind !== "user") return undefined;
