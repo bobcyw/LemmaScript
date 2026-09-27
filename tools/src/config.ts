@@ -68,23 +68,24 @@ function isKnownKey(key: string): key is keyof OptionSpecs {
   return Object.hasOwn(OPTION_SPECS, key);
 }
 
-function parseValue(key: keyof OptionSpecs, raw: unknown, source: string): LscOptions[typeof key] {
+/** Validate one option against the registry and return its typed value. */
+export function parseOptionValue<K extends keyof LscOptions>(key: K, raw: unknown, source: string): LscOptions[K] {
   const spec = OPTION_SPECS[key] as AnyOptionSpec;
   if (spec.type === "boolean") {
     if (typeof raw !== "boolean") fail(source, `option '${key}' must be true or false`);
-    return raw as LscOptions[typeof key];
+    return raw as LscOptions[K];
   }
   if (spec.type === "enum") {
     if (typeof raw !== "string" || !(spec.values as readonly string[]).includes(raw)) {
       fail(source, `option '${key}' must be one of: ${spec.values.join(", ")}`);
     }
-    return raw as LscOptions[typeof key];
+    return raw as LscOptions[K];
   }
   if (typeof raw !== "string" || raw.trim().length === 0) {
     fail(source, `option '${key}' must be a non-empty relative path`);
   }
   if (path.isAbsolute(raw)) fail(source, `option '${key}' must be relative to lemmascript.json`);
-  return raw as LscOptions[typeof key];
+  return raw as LscOptions[K];
 }
 
 /** Validate a parsed lemmascript.json object, returning only explicitly set keys. */
@@ -98,7 +99,7 @@ export function validateOptions(raw: unknown, source: string): ExplicitOptions {
     if (!isKnownKey(key)) {
       fail(source, `unknown option '${key}' (known options: ${KNOWN_KEYS.join(", ")})`);
     }
-    out[key] = parseValue(key, value, source);
+    out[key] = parseOptionValue(key, value, source);
   }
   return out as ExplicitOptions;
 }
@@ -109,10 +110,10 @@ function parseDirectiveValue(key: keyof OptionSpecs, text: string, source: strin
     if (text !== "true" && text !== "false") fail(source, `option '${key}' must be true or false`);
     return (text === "true") as LscOptions[typeof key];
   }
-  if (spec.type === "enum") return parseValue(key, text, source);
+  if (spec.type === "enum") return parseOptionValue(key, text, source);
   // Config-only today, but keep the diagnostic precise if a future path is
   // made file-overridable.
-  return parseValue(key, text, source);
+  return parseOptionValue(key, text, source);
 }
 
 /**

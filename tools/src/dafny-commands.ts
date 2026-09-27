@@ -5,6 +5,7 @@
 import { existsSync, readFileSync, writeFileSync, copyFileSync, unlinkSync } from "fs";
 import { execFileSync } from "child_process";
 import path from "path";
+import { DEFAULT_OPTIONS, parseOptionValue, type LscOptions } from "./config.js";
 
 function writeGen(genPath: string, text: string) {
   writeFileSync(genPath, text);
@@ -69,7 +70,6 @@ export function dafnyCheckDiff(genPath: string, dfyPath: string): boolean {
 }
 
 const OPTIONS_HEADER = /^\/\/ lsc options:(.*)$/m;
-const STRING_SEMANTICS = ["unicode-scalar", "javascript-utf16"];
 
 /**
  * Build verifier arguments from the generated file's `// lsc options:` header.
@@ -80,17 +80,18 @@ const STRING_SEMANTICS = ["unicode-scalar", "javascript-utf16"];
  * Other warning categories remain fatal.
  */
 export function dafnyVerifyArgs(content: string, timeLimit?: number, extraFlags?: string): { args: string[]; error?: string } {
-  let stringSemantics = "unicode-scalar";
+  let stringSemantics: LscOptions["string-semantics"] = DEFAULT_OPTIONS["string-semantics"];
   const header = content.match(OPTIONS_HEADER);
   for (const token of (header?.[1] ?? "").trim().split(/\s+/).filter(Boolean)) {
     const eq = token.indexOf("=");
     const key = eq < 0 ? token : token.slice(0, eq);
     const value = eq < 0 ? "" : token.slice(eq + 1);
     if (key !== "string-semantics") continue;
-    if (!STRING_SEMANTICS.includes(value)) {
-      return { args: [], error: `ERROR: unknown string-semantics '${value}' in the generated header; this lsc knows ${STRING_SEMANTICS.join(", ")}.` };
+    try {
+      stringSemantics = parseOptionValue(key, value, "generated header");
+    } catch (error) {
+      return { args: [], error: `ERROR: ${error instanceof Error ? error.message : String(error)}` };
     }
-    stringSemantics = value;
   }
   const utf16 = stringSemantics === "javascript-utf16";
   const usesStandardLibrary = content.includes("Std.");
