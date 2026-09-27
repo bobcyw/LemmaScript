@@ -764,7 +764,7 @@ function tryRecordIndexByEnum(obj: TExpr, idx: TExpr, ctx: Ctx): TExpr | null {
   return expr;
 }
 
-function resolveExpr(e: RawExpr, ctx: Ctx): TExpr {
+function resolveExpr(e: RawExpr, ctx: Ctx, returnedType?: Ty): TExpr {
   switch (e.kind) {
     case "var":
       if (e.name === "undefined") return { kind: "var", name: "undefined", ty: { kind: "void" } };
@@ -1203,26 +1203,34 @@ function resolveExpr(e: RawExpr, ctx: Ctx): TExpr {
     }
 
     case "lambda": {
-      // Resolve lambda params — types from explicit annotation or unknown
-      const params = e.params.map(p => ({
+      // Only a lambda in return position receives the enclosing signature.
+      // Do not use ctx.returnTy here: it is also present while resolving local
+      // initializers and call arguments, whose callbacks have their own context.
+      let target = returnedType;
+      if (target?.kind === "user") {
+        const decl = declOf(ctx.typeDecls, target.name);
+        if (decl?.kind === "alias") target = decl.aliasOfTy;
+      }
+      const signature = target?.kind === "fn" ? target : undefined;
+      const params = e.params.map((p, i) => ({
         name: p.name,
-        ty: p.tsType ? parseTsType(p.tsType) : { kind: "unknown" as const },
+        ty: p.tsType ? parseTsType(p.tsType) : signature?.params[i] ?? { kind: "unknown" as const },
       }));
       // Extend env with lambda params
       let lambdaEnv = ctx.env;
       for (const p of params) lambdaEnv = extend(lambdaEnv, p.name, p.ty);
-      // Set returnTy to the lambda's own return annotation (not the enclosing
-      // function's), so return-position record literals in the body resolve to
-      // their named type rather than an anonymous tuple.
-      const lambdaReturnTy: Ty = e.returnTsType ? parseTsType(e.returnTsType) : { kind: "unknown" };
+      // The callable result type becomes the lambda's own return context.
+      // Elsewhere retain the existing inferred/annotated result type so record
+      // literals resolve to their named type rather than an anonymous tuple.
+      const lambdaReturnTy: Ty = signature?.result ?? (e.returnTsType ? parseTsType(e.returnTsType) : { kind: "unknown" });
       const lambdaCtx = { ...withEnv(ctx, lambdaEnv), inLambda: true, returnTy: lambdaReturnTy };
       // Body: expression (wrap in return stmt) or statement block
       const body = Array.isArray(e.body)
         ? resolveBlock(e.body, lambdaCtx)
-        : [{ kind: "return" as const, value: resolveExpr(e.body, lambdaCtx) }];
+        : [{ kind: "return" as const, value: resolveExpr(e.body, lambdaCtx, lambdaReturnTy) }];
       // Carry the lambda's type as a fn type when its return is known, so chained
       // array methods (`.map(...).filter(...)`) can infer downstream element types.
-      const lamTy: Ty = e.returnTsType
+      const lamTy: Ty = signature || e.returnTsType
         ? { kind: "fn", params: params.map(p => p.ty), result: lambdaReturnTy }
         : { kind: "unknown" };
       return { kind: "lambda", params, body, ty: lamTy };
@@ -1259,8 +1267,8 @@ function resolveExpr(e: RawExpr, ctx: Ctx): TExpr {
       thenCtx = withInAtoms(thenCtx, extractInAtoms(cond));
       elseCtx = withInAtoms(elseCtx, extractInAtomsNegated(cond));
 
-      let then_ = resolveExpr(e.then, thenCtx);
-      let else_ = resolveExpr(e.else, elseCtx);
+      let then_ = resolveExpr(e.then, thenCtx, returnedType);
+      let else_ = resolveExpr(e.else, elseCtx, returnedType);
       then_ = coerceStr(then_, else_.ty);
       else_ = coerceStr(else_, then_.ty);
       const ty = conditionalResultTy(then_.ty, else_.ty);
@@ -1415,7 +1423,7 @@ function resolveStmt(s: RawStmt, ctx: Ctx): [TStmt, Env | null] {
     }
 
     case "return": {
-      const value = coerceToTargetTy(resolveExpr(s.value, ctx), ctx.returnTy, ctx.typeDecls);
+      const value = coerceToTargetTy(resolveExpr(s.value, ctx, ctx.returnTy), ctx.returnTy, ctx.typeDecls);
       return [{ kind: "return", value }, ctx.env];
     }
 

@@ -544,7 +544,9 @@ function extractExpr(node: Expression): RawExpr {
     const destructureBindings: RawStmt[] = [];
     const params = node.getParameters().map((p, paramIndex) => {
       const typeNode = p.getTypeNode();
-      const tsType = typeNode ? typeNode.getText() : undefined;
+      const tsType = typeNode
+        ? callableInterfaceText(typeNode.getType()) ?? typeNode.getText()
+        : undefined;
       const nameNode = p.getNameNode();
       if (Node.isIdentifier(nameNode)) return { name: nameNode.getText(), tsType };
       if (Node.isArrayBindingPattern(nameNode)) {
@@ -1035,7 +1037,32 @@ function declaredTypeTextIfBetter(propDecl: Node | undefined, tsType: string): s
   return text;
 }
 
-function typeToString(type: Type): string {
+/** A property-free, monomorphic call signature has the same value model as
+ * an arrow. Read the instantiated signature, including imported and inherited
+ * interfaces. This normalizes callable types, not unannotated lambda parameters.
+ * Overloads, generic calls, and callable objects with fields need a richer IR.
+ */
+function callableInterfaceText(type: Type, seen = new Set<ts.Type>()): string | undefined {
+  if (!type.getSymbol()?.getDeclarations().some(Node.isInterfaceDeclaration)
+    || type.getProperties().length || type.getConstructSignatures().length
+    || type.getStringIndexType() || type.getNumberIndexType()) return undefined;
+  const signatures = type.getCallSignatures();
+  if (signatures.length !== 1 || signatures[0].getTypeParameters().length) return undefined;
+  if (seen.has(type.compilerType)) throw new Error("Recursive callable interfaces are not supported");
+  const sig = signatures[0];
+  const declaration = sig.getDeclaration();
+  if (!Node.isCallSignatureDeclaration(declaration)
+    || declaration.getParameters().some(p => p.isRestParameter() || p.hasQuestionToken() || p.getName() === "this")) return undefined;
+  const next = new Set([...seen, type.compilerType]);
+  const text = (t: Type) => {
+    const printed = typeToString(t, next);
+    return _inFunctionExtraction ? _eraseGenerics(printed) : printed;
+  };
+  const params = sig.getParameters().map((p, i) => `_p${i}: ${text(p.getTypeAtLocation(declaration))}`);
+  return `((${params.join(", ")}) => ${text(sig.getReturnType())})`;
+}
+
+function typeToString(type: Type, callableSeen = new Set<ts.Type>()): string {
   if (type.isUndefined()) return "undefined";
   if (type.isNumber() || type.isNumberLiteral()) return "number";
   if (type.isBigInt() || type.isBigIntLiteral()) return "bigint";
@@ -1044,11 +1071,13 @@ function typeToString(type: Type): string {
   // literals back so the union dedupes to a single `boolean` rather than being
   // mistaken for an unmodelable multi-member union.
   if (type.isBoolean() || type.isBooleanLiteral()) return "boolean";
+  const callable = callableInterfaceText(type, callableSeen);
+  if (callable) return callable;
   // Named type alias (e.g. Priority = "low" | "medium" | "high") — use the alias name
   if (type.getAliasSymbol()) {
     const name = type.getAliasSymbol()!.getName();
     const args = type.getAliasTypeArguments();
-    if (args.length > 0) return `${name}<${args.map(t => typeToString(t)).join(", ")}>`;
+    if (args.length > 0) return `${name}<${args.map(t => typeToString(t, callableSeen)).join(", ")}>`;
     return name;
   }
   if (type.isUnion()) {
@@ -1065,8 +1094,8 @@ function typeToString(type: Type): string {
       const otherMember = arrayMember === m0 ? m1 : m0;
       if (arrayMember && otherMember && !otherMember.isArray()
           && !otherMember.isUndefined() && !otherMember.isNull()) {
-        const elemName = typeToString(arrayMember.getArrayElementTypeOrThrow());
-        const otherName = typeToString(otherMember);
+        const elemName = typeToString(arrayMember.getArrayElementTypeOrThrow(), callableSeen);
+        const otherName = typeToString(otherMember, callableSeen);
         const synthName = _synthName(elemName, otherName);
         if (!_synthArrayUnions.some(d => d.name === synthName)) {
           _synthArrayUnions.push({
@@ -1082,7 +1111,7 @@ function typeToString(type: Type): string {
         return synthName;
       }
     }
-    const parts = [...new Set(unionTypes.map(typeToString))];
+    const parts = [...new Set(unionTypes.map(t => typeToString(t, callableSeen)))];
     // `undefined`/`null` are optional markers; a single real member with them
     // is an Option, left as `X | undefined` for the optional lowering.
     const real = parts.filter(p => p !== "undefined" && p !== "null");
@@ -1093,11 +1122,11 @@ function typeToString(type: Type): string {
     return real.length === parts.length ? opaque : `${opaque} | undefined`;
   }
   if (type.isTuple()) {
-    return `[${type.getTupleElements().map(t => typeToString(t)).join(", ")}]`;
+    return `[${type.getTupleElements().map(t => typeToString(t, callableSeen)).join(", ")}]`;
   }
   if (type.isArray()) {
     const elem = type.getArrayElementTypeOrThrow();
-    return `${typeToString(elem)}[]`;
+    return `${typeToString(elem, callableSeen)}[]`;
   }
   const symbol = type.getSymbol() ?? type.getAliasSymbol();
   if (symbol) {
@@ -1110,7 +1139,7 @@ function typeToString(type: Type): string {
     }
     const typeArgs = type.getTypeArguments();
     if (typeArgs.length > 0) {
-      return `${name}<${typeArgs.map(t => typeToString(t)).join(", ")}>`;
+      return `${name}<${typeArgs.map(t => typeToString(t, callableSeen)).join(", ")}>`;
     }
     return name;
   }
@@ -1995,7 +2024,10 @@ function extractFunctionInner(fn: FunctionDeclaration, parentAnnotations?: Annot
       // (e.g., `eof = false` infers `boolean` from the default value).
       const tn = p.getTypeNode();
       let tsType: string;
-      if (tn && Node.isUnionTypeNode(tn)) {
+      const callable = callableInterfaceText(p.getType());
+      if (callable) {
+        tsType = _eraseGenerics(callable);
+      } else if (tn && Node.isUnionTypeNode(tn)) {
         tsType = _eraseGenerics(_tsTypeFromUnionNode(tn));
       } else if (tn) {
         tsType = _eraseGenerics(tn.getText());
@@ -2022,6 +2054,8 @@ function extractFunctionInner(fn: FunctionDeclaration, parentAnnotations?: Annot
         return "void";  // Promise<void>
       }
       const node = fn.getReturnTypeNode();
+      const callable = callableInterfaceText(fn.getReturnType());
+      if (callable) return _eraseGenerics(callable);
       // A type predicate (`x is T` / `asserts x is T`) is a `boolean` at
       // runtime; the narrowing it performs is a TS-only refinement with no
       // counterpart in the model. Without this, `getText()` yields "x is T"
