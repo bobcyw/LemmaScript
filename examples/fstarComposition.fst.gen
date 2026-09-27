@@ -29,9 +29,10 @@ let v_incrementThenDouble  (v_x:int)
       (ensures (fun ls_result ->
         (ls_result == ((v_x + (1)) * (2)))
       )) =
-  ((v_compose ((fun (v_n:int) ->
+  (let v__5f_callee_7 = (v_compose ((fun (v_n:int) ->
     (v_n * (2)))) ((fun (v_n:int) ->
-    (v_n + (1))))) (v_x))
+    (v_n + (1))))) in
+  (v__5f_callee_7 (v_x)))
 
 let v_twice  (v_f:(int -> GTot int)) (v_x:int)
   : Ghost int

@@ -29,7 +29,8 @@ let v_addThroughClosure  (v_n:int) (v_x:int)
       (ensures (fun ls_result ->
         (ls_result == (v_x + v_n))
       )) =
-  ((v_makeAdder (v_n)) (v_x))
+  (let v__5f_callee_7 = (v_makeAdder (v_n)) in
+  (v__5f_callee_7 (v_x)))
 
 let v_addTwice  (v_n:int) (v_x:int)
   : Ghost int
@@ -39,5 +40,5 @@ let v_addTwice  (v_n:int) (v_x:int)
       (ensures (fun ls_result ->
         (ls_result == ((v_x + v_n) + v_n))
       )) =
-  (let v_add_10 = (v_makeAdder (v_n)) in
-  (v_add_10 ((v_add_10 (v_x)))))
+  (let v_add_11 = (v_makeAdder (v_n)) in
+  (v_add_11 ((v_add_11 (v_x)))))

@@ -1288,12 +1288,7 @@ function resolveExpr(e: RawExpr, ctx: Ctx, returnedType?: Ty): TExpr {
       // Only a lambda in return position receives the enclosing signature.
       // Do not use ctx.returnTy here: it is also present while resolving local
       // initializers and call arguments, whose callbacks have their own context.
-      let target = returnedType;
-      if (target?.kind === "user") {
-        const decl = declOf(ctx.typeDecls, target.name);
-        if (decl?.kind === "alias") target = decl.aliasOfTy;
-      }
-      const signature = target?.kind === "fn" ? target : undefined;
+      const signature = functionType(returnedType, ctx.typeDecls);
       const params = e.params.map((p, i) => ({
         name: p.name,
         ty: p.tsType ? parseTsType(p.tsType) : signature?.params[i] ?? { kind: "unknown" as const },

@@ -921,10 +921,7 @@ function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
         }
         return result;
       }
-      if (e.fn.kind !== "var" && _opts.nativeContracts) {
-        return { kind: "app", fn: "__fstarApply", args: [lowerExpr(e.fn, binds), ...e.args.map(a => lowerExpr(a, binds))] };
-      }
-      if (e.fn.kind !== "var" && _opts.backend === "dafny" && e.fn.ty.kind === "fn") {
+      if (e.fn.kind !== "var" && (_opts.nativeContracts || _opts.backend === "dafny" && e.fn.ty.kind === "fn")) {
         // Applying a returned/selected function uses the same named-call IR as
         // a source local, evaluating the callee once before its arguments.
         const callee = freshName("_callee");

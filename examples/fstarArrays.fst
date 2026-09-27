@@ -29,8 +29,9 @@ let v_incrementAll  (v_items:(S.seq int))
       (ensures (fun ls_result ->
         ((S.length (ls_result)) == (S.length (v_items)))
       )) =
-  ((v_mapper (v_items)) ((fun (v_x:int) ->
-    (v_x + (1)))))
+  (let v__5f_callee_4 = (v_mapper (v_items)) in
+  (v__5f_callee_4 ((fun (v_x:int) ->
+    (v_x + (1))))))
 
 let v_doublePositives  (v_items:(S.seq int))
   : Ghost (S.seq int)
@@ -40,9 +41,10 @@ let v_doublePositives  (v_items:(S.seq int))
       (ensures (fun ls_result ->
         ((S.length (ls_result)) <= (S.length (v_items)))
       )) =
-  ((v_mapper ((R.filter ((fun (v_x:int) ->
-    (v_x > (0)))) (v_items)))) ((fun (v_x:int) ->
-    (v_x * (2)))))
+  (let v__5f_callee_8 = (v_mapper ((R.filter ((fun (v_x:int) ->
+    (v_x > (0)))) (v_items)))) in
+  (v__5f_callee_8 ((fun (v_x:int) ->
+    (v_x * (2))))))
 
 // Proof addition: mapping twice agrees with mapping the composed callback.
 let map_fusion (#a:Type) (#b:Type) (#c:Type)

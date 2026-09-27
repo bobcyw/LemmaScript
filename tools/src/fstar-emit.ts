@@ -6,7 +6,8 @@ import type { Ty, TModule } from "./typedir.js";
 import type { Decl, Expr, Stmt, Param, MatchPattern, FnDef, FnMethod, FnDefByMethod, ExternDecl } from "./ir.js";
 import { exactIntegerLiteral, anyExpr, anyExprInStmts } from "./ir.js";
 import { transformModuleFstar } from "./transform.js";
-import { parseTsType, substituteTypeParams, typeApplication } from "./types.js";
+import { substituteTypeParams, typeApplication } from "./types.js";
+import { tyBaseName } from "./typedecls.js";
 
 export function fstarName(s: string): string {
   return "v_" + [...s].map(c => /[A-Za-z0-9]/.test(c) ? c : `_${c.codePointAt(0)!.toString(16)}_`).join("");
@@ -69,16 +70,6 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
   let fresh=0;
   const bind=(c:Ctx,id:string,ty:Ty,text=n(id)):Ctx=>({...c,vars:new Map([...c.vars,[id,{text,ty,id:fresh++}]])});
   const root=():Ctx=>({vars:new Map(),deps:new Set()});
-  function parts(s:string):[string,Ty[]] {
-    const start=s.indexOf("<");if(start<0)return [s,[]];
-    const args:string[]=[];let depth=0,last=start+1;
-    for(let i=last;i<s.length-1;i++){
-      if(s[i]==="<"||s[i]==="("||s[i]==="[")depth++;
-      if(s[i]===">"||s[i]===")"||s[i]==="]")depth--;
-      if(s[i]===","&&!depth){args.push(s.slice(last,i));last=i+1;}
-    }
-    args.push(s.slice(last,-1));return [s.slice(0,start),args.map(a=>parseTsType(a.trim()))];
-  }
   function expand(t:Ty):Ty {
     if(t.kind==="user"&&aliases.has(t.name))return expand(aliases.get(t.name)!);
     return t;
@@ -97,7 +88,10 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
       case "set":return `(FS.set ${keyType(t.elem)})`;
       case "map":return `(FM.map ${keyType(t.key)} ${type(t.value)})`;
       case "fn":return `(${t.params.length?t.params.map(type).join(" -> "):"unit"} -> GTot ${type(t.result)})`;
-      case "user":{const [id,args]=parts(t.name);return args.length?`(${n(id)} ${args.map(type).join(" ")})`:n(id);}
+      case "user":{
+        const applied = typeApplication(t.name);
+        return applied ? `(${n(applied.name)} ${applied.args.map(type).join(" ")})` : n(t.name);
+      }
       case "unknown":needsUnknown=true;return "ls_unknown";
     }
   }
@@ -118,16 +112,8 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
           pattern.params.forEach((p,i)=>{if(actual.params[i])infer(p,actual.params[i]);});infer(pattern.result,actual.result);
         }
       };
-      const subst=(t:Ty):Ty=>{
-        if(t.kind==="user")return bindings.get(t.name)??t;
-        if(t.kind==="array")return {...t,elem:subst(t.elem)};
-        if(t.kind==="optional")return {...t,inner:subst(t.inner)};
-        if(t.kind==="fn")return {...t,params:t.params.map(subst),result:subst(t.result)};
-        if(t.kind==="tuple")return {...t,elems:t.elems.map(subst)};
-        return t;
-      };
       f.params.forEach((p,i)=>{if(e.args[i])infer(p.type,of(e.args[i],c));});
-      return expand(subst(f.returnType));
+      return expand(substituteTypeParams(f.returnType,bindings));
     }
     if(e.ty&&e.ty.kind!=="unknown")return expand(e.ty);
     switch(e.kind){
@@ -137,7 +123,7 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
       case "app":return funcs.get(e.fn)?.returnType??unknown;
       case "field":{
         const t=of(e.obj,c);if(t.kind==="user"){
-          const d=data.get(parts(t.name)[0]);
+          const d=data.get(tyBaseName(t.name));
           if(d?.kind==="structure")return d.fields.find(f=>f.name===e.field)?.type??unknown;
           if(d?.kind==="inductive")return d.constructors.flatMap(x=>x.fields).find(f=>f.name===e.field)?.type??unknown;
         }
@@ -162,7 +148,7 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
   }
   function ctor(id:string,t?:string):string {
     if(id==="some")return "Some";if(id==="none")return "None";
-    let parent=t?parts(t)[0]:undefined;
+    let parent=t?tyBaseName(t):undefined;
     if(!parent){const ds=[...data.values()].filter(d=>d.kind==="inductive"&&d.constructors.some(x=>x.name===id));if(ds.length===1)parent=ds[0].name;}
     if(!parent)fail(`cannot resolve constructor '${id}'`);
     return `C_${n(parent!)}_${n(id)}`;
@@ -174,7 +160,7 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
     let fields:Param[]=[];let parent:string|undefined;
     if(t.kind==="optional")fields=[{name:"value",type:t.inner}];
     if(t.kind==="user"){
-      parent=parts(t.name)[0];const d=data.get(parent);
+      parent=tyBaseName(t.name);const d=data.get(parent);
       if(d?.kind==="inductive"){
         const args=typeApplication(t.name)?.args??[];
         const bindings=new Map((d.typeParams??[]).flatMap((p,i)=>args[i]?[[p,args[i]] as const]:[]));
@@ -199,7 +185,7 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
       if(["=","≠"].includes(e.op)){
         if(of(e.left,c).kind==="fn"||of(e.right,c).kind==="fn")fail("function identity equality is not modeled; use pointwise specifications");
         if(e.right.kind==="constructor"&&!e.right.args.length){
-          const t=of(e.left,c);const d=t.kind==="user"?data.get(parts(t.name)[0]):undefined;
+          const t=of(e.left,c);const d=t.kind==="user"?data.get(tyBaseName(t.name)):undefined;
           const fields=d?.kind==="inductive"?d.constructors.find(x=>x.name===(e.right as any).name)?.fields:undefined;
           if(fields?.length){const test=`(match ${expr(e.left,c)} with | ${ctor(e.right.name,t.kind==="user"?t.name:undefined)} ${fields.map(()=>"_").join(" ")} -> true | _ -> false)`;return e.op==="="?test:`(not ${test})`;}
         }
@@ -268,7 +254,7 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
           return app("S.length",[obj]);
         }
         if(!e.datatypeField&&e.field==="keys"&&t.kind==="map")return app("FM.domain",[obj]);
-        const parent=e.fromUnion??(t.kind==="user"?parts(t.name)[0]:undefined);
+        const parent=e.fromUnion??(t.kind==="user"?tyBaseName(t.name):undefined);
         const d=parent?data.get(parent):undefined;
         if(d?.kind==="structure")return `(${obj}).${field(d.name,e.field)}`;
         if(d?.kind==="inductive"){
@@ -279,7 +265,7 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
         return fail(`unsupported field ${e.field} of ${JSON.stringify(t)}`);
       }
       case "record":{
-        const t=e.ty?.kind!=="unknown" && e.ty?of(e,c):e.spread?of(e.spread,c):of(e,c);const parent=e.ctorOf??(expected?.kind==="user"?parts(expected.name)[0]:undefined)??(t.kind==="user"?parts(t.name)[0]:undefined)??[...data.values()].find(d=>d.kind==="structure"&&d.fields.length===e.fields.length&&d.fields.every(f=>e.fields.some(x=>x.name===f.name)))?.name;
+        const t=e.ty?.kind!=="unknown" && e.ty?of(e,c):e.spread?of(e.spread,c):of(e,c);const parent=e.ctorOf??(expected?.kind==="user"?tyBaseName(expected.name):undefined)??(t.kind==="user"?tyBaseName(t.name):undefined)??[...data.values()].find(d=>d.kind==="structure"&&d.fields.length===e.fields.length&&d.fields.every(f=>e.fields.some(x=>x.name===f.name)))?.name;
         const d=parent?data.get(parent):undefined;
         if(d?.kind==="structure"){
           const fields=e.fields.map(f=>`${field(d.name,f.name)} = ${expr(f.value,c,d.fields.find(x=>x.name===f.name)?.type)}`);
@@ -297,7 +283,6 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
         return fail(`record has no resolved type: ${JSON.stringify(t)}`);
       }
       case "app":{
-        if(e.fn==="__fstarApply")return app(expr(e.args[0],c),e.args.slice(1).map(x=>expr(x,c)));
         if(e.ctorOf)return app(ctor(e.fn,e.ctorOf),e.args.map(x=>expr(x,c)));
         if(!funcs.has(e.fn)&&!c.vars.has(e.fn)&&[...data.values()].some(d=>d.kind==="inductive"&&d.constructors.some(x=>x.name===e.fn)))return app(ctor(e.fn,expected?.kind==="user"?expected.name:undefined),e.args.map(x=>expr(x,c)));
         const helpers:Record<string,string>={JSFloorDiv:"R.floor_div",JSTruncDiv:"R.trunc_div",JSRem:"R.rem",MathAbs:"R.abs",MathMin:"R.min",MathMax:"R.max",FloorReal:"R.floor",CeilReal:"R.ceil",JSStringLt:"R.string_lt",StringFromCharCode:"R.from_char_code",IntToString:"R.int_to_string",NatToString:"R.nat_to_string",Perm:"R.perm",SetFromSeq:"R.set_from_seq",SetToSeq:"R.set_to_seq",MaxOfSeq:"R.maximum",MinOfSeq:"R.minimum"};

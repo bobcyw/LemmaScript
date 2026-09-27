@@ -40,5 +40,6 @@ let v_incrementThreeTimes  (v_x:int)
       (ensures (fun ls_result ->
         (ls_result >= v_x)
       )) =
-  ((v_iterate ((3)) ((fun (v_y:int) ->
-    (v_y + (1))))) (v_x))
+  (let v__5f_callee_13 = (v_iterate ((3)) ((fun (v_y:int) ->
+    (v_y + (1))))) in
+  (v__5f_callee_13 (v_x)))

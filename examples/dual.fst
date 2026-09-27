@@ -25,7 +25,8 @@ let v_dual (#v_A:Type) (#v_B:Type) (#v_R:Type) (v_body:(v_A -> v_B -> GTot v_R))
         True
       ))
       (ensures (fun ls_result ->
-        (forall (v_that:v_B). (forall (v_self:v_A). (((ls_result (v_that)) (v_self)) == (v_body (v_self) (v_that)))))
+        (forall (v_that:v_B). (forall (v_self:v_A). ((let v__5f_callee_4 = (ls_result (v_that)) in
+(v__5f_callee_4 (v_self))) == (v_body (v_self) (v_that)))))
       )) =
   (fun (v_that:v_B) ->
     (fun (v_self:v_A) ->
@@ -61,13 +62,13 @@ let v_curriedPolicy (#v_A:Type) (#v_B:Type) (v_eligible:(v_A -> GTot bool)) (v_d
       (ensures (fun ls_result ->
         (forall (v_value:v_B). ((ls_result (v_value)) == ((v_eligible ((v_project (v_value)))) && (not (v_denied ((v_project (v_value))))))))
       )) =
-  (let v_denyLast_21 = (v_dual ((fun (v_self:(v_A -> GTot bool)) (v_denied:(v_A -> GTot bool)) ->
+  (let v_denyLast_22 = (v_dual ((fun (v_self:(v_A -> GTot bool)) (v_denied:(v_A -> GTot bool)) ->
     (v_denyOverride (v_self) (v_denied))))) in
-  (let v_mapLast_24 = (v_dual ((fun (v_self:(v_A -> GTot bool)) (v_project:(v_B -> GTot v_A)) ->
+  (let v_mapLast_25 = (v_dual ((fun (v_self:(v_A -> GTot bool)) (v_project:(v_B -> GTot v_A)) ->
     (v_mapInput (v_self) (v_project))))) in
-  (let v_withDenial_27 = (v_denyLast_21 (v_denied)) in
-  (let v_onInput_28 = (v_mapLast_24 (v_project)) in
-  (v_onInput_28 ((v_withDenial_27 (v_eligible))))))))
+  (let v_withDenial_28 = (v_denyLast_22 (v_denied)) in
+  (let v_onInput_29 = (v_mapLast_25 (v_project)) in
+  (v_onInput_29 ((v_withDenial_28 (v_eligible))))))))
 
 let v_callingFormsAgree (#v_A:Type) (#v_B:Type) (v_eligible:(v_A -> GTot bool)) (v_denied:(v_A -> GTot bool)) (v_project:(v_B -> GTot v_A)) (v_value:v_B)
   : Ghost bool
@@ -77,9 +78,9 @@ let v_callingFormsAgree (#v_A:Type) (#v_B:Type) (v_eligible:(v_A -> GTot bool)) 
       (ensures (fun ls_result ->
         ls_result
       )) =
-  (let v_direct_34 = (v_mapInput ((v_denyOverride (v_eligible) (v_denied))) (v_project)) in
-  (let v_curried_35 = (v_curriedPolicy (v_eligible) (v_denied) (v_project)) in
-  (R.decide (((v_direct_34 (v_value)) == (v_curried_35 (v_value)))))))
+  (let v_direct_35 = (v_mapInput ((v_denyOverride (v_eligible) (v_denied))) (v_project)) in
+  (let v_curried_36 = (v_curriedPolicy (v_eligible) (v_denied) (v_project)) in
+  (R.decide (((v_direct_35 (v_value)) == (v_curried_36 (v_value)))))))
 
 let v_canEnter  (v_request:v_Request)
   : Ghost bool
@@ -89,7 +90,8 @@ let v_canEnter  (v_request:v_Request)
       (ensures (fun ls_result ->
         (ls_result == (((v_request).f_v_Request_v_account).f_v_Account_v_member && (not ((v_request).f_v_Request_v_account).f_v_Account_v_suspended)))
       )) =
-  ((v_curriedPolicy ((fun (v_account:v_Account) ->
+  (let v__5f_callee_39 = (v_curriedPolicy ((fun (v_account:v_Account) ->
     (v_account).f_v_Account_v_member)) ((fun (v_account:v_Account) ->
     (v_account).f_v_Account_v_suspended)) ((fun (v_request:v_Request) ->
-    (v_request).f_v_Request_v_account))) (v_request))
+    (v_request).f_v_Request_v_account))) in
+  (v__5f_callee_39 (v_request)))

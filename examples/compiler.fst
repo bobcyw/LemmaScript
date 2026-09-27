@@ -95,8 +95,9 @@ let v_run  (v_expression:v_Expression) (v_environment:v_Environment)
       (ensures (fun ls_result ->
         (ls_result == (v_evaluate (v_expression) (v_environment)))
       )) =
-  ((v_compile (v_expression)) (v_environment) ((fun (v_value:int) ->
-    v_value)))
+  (let v__5f_callee_62 = (v_compile (v_expression)) in
+  (v__5f_callee_62 (v_environment) ((fun (v_value:int) ->
+    v_value))))
 
 // Normalize the concrete syntax tree separately from the recursive compiler.
 unfold let shadowing_expression =
@@ -121,14 +122,14 @@ let v_shadowingDemo  (v_x:int)
       (ensures (fun ls_result ->
         (ls_result == (((30) * (v_x + (1))) + (1)))
       )) =
-  let v_program_65 : v_Expression = (C_v_Expression_v_let ((0)) ((C_v_Expression_v_add ((C_v_Expression_v_variable ((0)))) ((C_v_Expression_v_literal ((1)))))) ((C_v_Expression_v_add ((C_v_Expression_v_let ((0)) ((C_v_Expression_v_multiply ((C_v_Expression_v_variable ((0)))) ((C_v_Expression_v_literal ((2)))))) ((C_v_Expression_v_variable ((0)))))) ((C_v_Expression_v_variable ((0))))))) in
-  let v__5f_t0_66 : (v_Environment -> v_Continuation -> GTot int) = (v_compile (v_program_65)) in
-  let v_code_67 : v_Code = v__5f_t0_66 in
-  let v_environment_68 : (int -> GTot int) = (fun (v_name:int) ->
+  let v_program_66 : v_Expression = (C_v_Expression_v_let ((0)) ((C_v_Expression_v_add ((C_v_Expression_v_variable ((0)))) ((C_v_Expression_v_literal ((1)))))) ((C_v_Expression_v_add ((C_v_Expression_v_let ((0)) ((C_v_Expression_v_multiply ((C_v_Expression_v_variable ((0)))) ((C_v_Expression_v_literal ((2)))))) ((C_v_Expression_v_variable ((0)))))) ((C_v_Expression_v_variable ((0))))))) in
+  let v__5f_t0_67 : (v_Environment -> v_Continuation -> GTot int) = (v_compile (v_program_66)) in
+  let v_code_68 : v_Code = v__5f_t0_67 in
+  let v_environment_69 : (int -> GTot int) = (fun (v_name:int) ->
     (if (R.decide ((v_name == (0)))) then v_x else (0))) in
-  let v_answer_70 : int = (v_code_67 (v_environment_68) ((fun (v_value:int) ->
+  let v_answer_71 : int = (v_code_68 (v_environment_69) ((fun (v_value:int) ->
     v_value))) in
-  let v_transformed_72 : int = (v_code_67 (v_environment_68) ((fun (v_value:int) ->
+  let v_transformed_73 : int = (v_code_68 (v_environment_69) ((fun (v_value:int) ->
     (((10) * v_value) + (1))))) in
-  assert ((v_transformed_72 == (((10) * v_answer_70) + (1))));
-  v_transformed_72
+  assert ((v_transformed_73 == (((10) * v_answer_71) + (1))));
+  v_transformed_73
