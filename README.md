@@ -1,6 +1,6 @@
 # LemmaScript (Tech Preview)
 
-A verification toolchain for TypeScript. Write ordinary TypeScript with `//@ ` specification annotations. The toolchain generates verifiable code from your TypeScript in Dafny, Lean 4 (with Velvet/Loom), or an experimental F* backend.
+A verification toolchain for TypeScript. Write ordinary TypeScript with `//@ ` specification annotations. The toolchain generates verifiable code from your TypeScript in Dafny, Lean 4 (with Velvet/Loom), or the F* backend.
 
 See [SPEC.md](SPEC.md), [DESIGN.md](DESIGN.md), and [GETTING_STARTED.md](GETTING_STARTED.md).
 
@@ -86,7 +86,7 @@ lsc gen --backend=lean src/myModule.ts
 lake build
 ```
 
-### F* backend (experimental)
+### F* backend
 
 The F* backend supports higher-order functions and returned closures alongside the existing examples with loops, records, arrays, strings, maps and sets. Install [F*](https://github.com/FStarLang/FStar/blob/master/INSTALL.md), then from this checkout run:
 

@@ -1,12 +1,12 @@
 # DESIGN_FSTAR — A backend for higher-order verification
 
-**Status:** experimental backend implemented across the example suite; dependent callback domains and recursive combinator adapters remain proposed.
+**Status:** backend implemented across the example suite; dependent callback domains and recursive combinator adapters remain proposed.
 **Date:** September 26, 2026 (feasibility experiments September 25).
 **Pre-implementation baseline:** LemmaScript 0.6.4, commit `097f18f`; Dafny 4.11.0; F* 2026.09.20 with its bundled Z3 4.13.3.
 
 ## Recommendation
 
-The experimental F* backend supports **modular proofs about user-defined higher-order functions**, including functions returning functions, compositional postconditions and generic combinator laws. Callbacks with input-dependent contracts and recursive traversals whose callbacks operate on smaller subtrees remain proposed extensions. Dependent function types give these contracts a natural representation, while retaining SMT assistance. F*'s combination of dependent types and automated verification is described in its [language introduction](https://fstar-lang.org/tutorial/book/intro.html).
+The F* backend supports **modular proofs about user-defined higher-order functions**, including functions returning functions, compositional postconditions and generic combinator laws. Callbacks with input-dependent contracts and recursive traversals whose callbacks operate on smaller subtrees remain proposed extensions. Dependent function types give these contracts a natural representation, while retaining SMT assistance. F*'s combination of dependent types and automated verification is described in its [language introduction](https://fstar-lang.org/tutorial/book/intro.html).
 
 The case is weaker if the objective is simply supporting more uses of `map`, `filter`, or `reduce`. LemmaScript already handles those with Dafny, and several current restrictions belong to the shared frontend or lowering. Fixing those can benefit all backends. Keep Dafny as the default while measuring whether F* reduces proof work on a few representative higher-order programs. The existing Lean backend is also a relevant baseline: dependent types are not unique to F*, and LemmaScript already pays for Lean/Loom/Velvet integration.
 

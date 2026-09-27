@@ -1,4 +1,4 @@
-# F* backend (experimental)
+# F* backend
 
 The F* backend verifies LemmaScript's mathematical value model, including higher-order functions, local mutation, loops, records, tagged unions, classes, arrays, strings, maps and sets. Function `requires` and `ensures` become checked F* `Ghost` signatures; function values use `GTot` arrows, so callers can use returned-closure guarantees directly. TypeScript remains the executable program. The F* model is for verification, not code extraction.
 

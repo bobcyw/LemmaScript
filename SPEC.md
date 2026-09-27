@@ -7,7 +7,7 @@ Backend-specific details:
 
 - [SPEC_LEAN.md](SPEC_LEAN.md) — Lean backend (Velvet/Loom, four-file scheme, proof workflow)
 - [SPEC_DAFNY.md](SPEC_DAFNY.md) — Dafny backend (two-file scheme, regen workflow)
-- [SPEC_FSTAR.md](SPEC_FSTAR.md) — experimental pure F* backend (higher-order functions, additions-only proofs); supports a subset of this specification
+- [SPEC_FSTAR.md](SPEC_FSTAR.md) — pure F* backend (higher-order functions, additions-only proofs); supports a subset of this specification
 
 ---
 

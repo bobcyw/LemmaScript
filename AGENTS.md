@@ -7,7 +7,7 @@ Guidance for AI coding agents working on LemmaScript itself or on projects that 
 A verification toolchain for TypeScript. The user writes ordinary TS with `//@ ` annotations. `lsc` generates:
 - **Dafny** — one `.dfy.gen` (always regeneratable) + one `.dfy` (the source of truth where proof additions accumulate). Diff must be additions-only.
 - **Lean 4 / Velvet / Loom** — four files: `.types.lean` + `.def.lean` are generated; `.spec.lean` + `.proof.lean` are hand-written.
-- **F* (experimental)** — a generated `foo.fst.gen` and an additions-only working `foo.fst` beside `foo.ts`. Higher-order functions and the shared mathematical value model; see [SPEC_FSTAR.md](SPEC_FSTAR.md).
+- **F\*** — a generated `foo.fst.gen` and an additions-only working `foo.fst` beside `foo.ts`. Higher-order functions and the shared mathematical value model; see [SPEC_FSTAR.md](SPEC_FSTAR.md).
 
 Whatever you do, the TS file is the source of truth for *the program*. The hand-written verification files are the source of truth for *the proof*. Don't conflate them.
 
