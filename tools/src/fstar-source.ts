@@ -1,6 +1,7 @@
 /** Source constructs whose semantics have already been erased by extraction. */
 import { Node, SyntaxKind, type SourceFile, type Type } from "ts-morph";
 import type { RawModule } from "./rawir.js";
+import { sourceFunctions } from "./source-functions.js";
 
 function isFunctionScope(n: Node): boolean {
   return Node.isArrowFunction(n) || Node.isFunctionExpression(n)
@@ -60,18 +61,20 @@ function capturedBindings(root: Node): Set<Node> {
 }
 
 export function checkFstarSource(source: SourceFile, raw: RawModule): void {
+  const functions = sourceFunctions(source);
   for (const stmt of source.getStatements()) {
     if (!(Node.isFunctionDeclaration(stmt) || Node.isVariableStatement(stmt)
       || Node.isTypeAliasDeclaration(stmt) || Node.isInterfaceDeclaration(stmt)
       || Node.isImportDeclaration(stmt) || Node.isExportDeclaration(stmt)
       || Node.isEmptyStatement(stmt) || Node.isClassDeclaration(stmt) || Node.isEnumDeclaration(stmt)
+      || Node.isModuleDeclaration(stmt)
       || stmt.getLeadingCommentRanges().some(c => /^\/\/@\s+skip\b/.test(c.getText().trim()))
       || (Node.isExpressionStatement(stmt) && /\/\/@\s+verify\b/.test(stmt.getFullText())))) {
       throw new Error("F*: unsupported module-level statement; only functions, constants, types, and imports/exports are supported");
     }
   }
   const selected = new Set(raw.functions.map(f => f.name));
-  const roots: Node[] = source.getFunctions().filter(f => selected.has(f.getName() ?? ""));
+  const roots: Node[] = functions.filter(f => selected.has(f.getName() ?? ""));
   if (raw.functions.some(f => f.contract.length)) throw new Error("F*: contract annotations are not supported; use requires/ensures");
   for (const v of source.getVariableDeclarations()) {
     const init = v.getInitializer();

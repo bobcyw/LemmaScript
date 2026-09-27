@@ -205,6 +205,66 @@ test("generic map, filter, every, some and initialized fold accept pure callback
   `), true);
 });
 
+test("function namespaces preserve generic callbacks and qualified calls", realFstar, () => {
+  const source = String.raw`
+    export namespace Functions {
+      export function compose<A,B,C>(f:(x:B)=>C,g:(x:A)=>B):(x:A)=>C {
+        //@ ensures forall(x:A, \result(x) === f(g(x)))
+        return (x:A):C => f(g(x));
+      }
+      export namespace Inner {
+        export function positive(x:number):number {
+          //@ requires x > 0
+          //@ ensures \result === x
+          return x;
+        }
+      }
+    }
+    export function caller(x:number):number {
+      //@ ensures \result === 2 * (x + 1)
+      return Functions.compose((n:number):number => 2*n, (n:number):number => n+1)(x);
+    }
+    export function checked():number { return Functions.Inner.positive(1); }
+  `;
+  assert.match(compile(source), /let v_compose/);
+  assert.equal(verify(source), true);
+  assert.equal(verify(source.replace("positive(1)", "positive(0)")), false);
+});
+
+test("namespace verification selection checks the selected function body", realFstar, () => {
+  const source = String.raw`
+    export namespace Selected {
+      export function identity(x:number):number {
+        //@ verify
+        //@ ensures \result === x
+        return x;
+      }
+      export async function ignored():Promise<number> { return await Promise.resolve(1); }
+    }
+  `;
+  assert.match(compile(source), /let v_identity/);
+  assert.doesNotMatch(compile(source), /v_ignored/);
+  assert.equal(verify(source), true);
+  assert.equal(verify(source.replace("return x;", "return x+1;")), false);
+});
+
+test("string ordering uses UTF-16 lexicographic comparisons and proper prefixes", realFstar, () => {
+  const source = String.raw`
+    export function ordering():boolean {
+      //@ ensures \result
+      return "" < "a" && "a" < "aa" && "ab" < "b" && "ab" <= "ab" &&
+        "b" > "aa" && "b" >= "b" && !("aa" <= "a") && !("a" >= "b") &&
+        "\uD83D\uDE00" < "\uE000" && "\uD800" < "\uD801";
+    }
+    export function asymmetry(a:string,b:string):boolean {
+      //@ ensures \result
+      return !(a < b && b < a);
+    }
+  `;
+  assert.equal(verify(source), true);
+  assert.equal(verify(source.replace('"\\uD83D\\uDE00" <', '"\\uD83D\\uDE00" >')), false);
+});
+
 for (const [label, code] of [
   ["false postcondition", String.raw`export function bad(x:number):number {
     //@ ensures \result > x
@@ -229,6 +289,14 @@ for (const [label, code] of [
 }
 
 for (const [label, code, error] of [
+  ["namespace mutable closure", `export namespace N { export function bad():()=>number { let x=0; return ():number => ++x; } }`, /mutation of captured variable/],
+  ["namespace reference equality", `export namespace N { export function bad(xs:number[],ys:number[]):boolean { return xs===ys; } }`, /reference equality/],
+  ["namespace state", `export namespace N { const x=1; export function bad():number { return x; } }`, /Only function declarations/],
+  ["namespace initialization", `export namespace N { console.log(1); export function bad():number { return 1; } }`, /Only function declarations/],
+  ["namespace name collision", `export namespace A { export function value():number { return 1; } } export namespace B { export function value():number { return 2; } }`, /Namespace function name collision/],
+  ["namespace arrow name collision", `const value=():number=>1; export namespace A { export function value():number { return 2; } }`, /Namespace function name collision/],
+  ["namespace lookalike object", `export namespace N { export function one():number { return 1; } } export function bad(ns:typeof N):number { return ns.one(); }`, /unsupported field/],
+  ["ambient namespace", `declare namespace N { function value():number; }`, /non-ambient function-only namespaces/],
   ["mutable closure", `export function bad():()=>number { let x=0; return ():number => ++x; }`, /mutation of captured variable/],
   ["reassigned captured parameter", `export function bad(x:number):number { const get=():number=>x; x++; return get(); }`, /mutation of captured variable/],
   ["shorthand capture", `type Box={x:number}; export function bad():Box { let x=0; const get=():Box=>({x}); x=1; return get(); }`, /mutation of captured variable/],

@@ -154,6 +154,39 @@ let endsWith (s suffix:string) : GTot bool =
   S.length suffix <= S.length s && eq (S.drop s (S.length s - S.length suffix)) suffix
 let from_char_code (n:int) : string = S.singleton (n % 65536)
 
+// JavaScript compares strings lexicographically by UTF-16 code unit. Sequence
+// prefix ordering and Unicode scalar ordering would both give different results.
+let rec string_lt (s t:string) : GTot bool (decreases (S.length s + S.length t)) =
+  if S.length s = 0 then S.length t > 0
+  else if S.length t = 0 then false
+  else if S.index s 0 < S.index t 0 then true
+  else if S.index s 0 > S.index t 0 then false
+  else string_lt (S.drop s 1) (S.drop t 1)
+
+let rec string_order (s t:string)
+  : Lemma
+      ((not (string_lt s t) /\ not (string_lt t s) <==> s == t) /\
+       (string_lt s t ==> not (string_lt t s)))
+      (decreases (S.length s + S.length t))
+      [SMTPat (string_lt s t)] =
+  if S.length s > 0 && S.length t > 0 && S.index s 0 = S.index t 0 then (
+    string_order (S.drop s 1) (S.drop t 1);
+    if not (string_lt s t) && not (string_lt t s) then (
+      assert (S.length s == S.length t);
+      assert (forall (i:nat). i < S.length s ==> S.index s i == S.index t i);
+      assert (S.equal s t)
+    )
+  ) else if S.length s = 0 && S.length t = 0 then assert (S.equal s t)
+
+let rec string_lt_trans (s t u:string)
+  : Lemma
+      ((string_lt s t /\ not (string_lt u t) ==> string_lt s u) /\
+       (not (string_lt t s) /\ string_lt t u ==> string_lt s u))
+      (decreases (S.length s + S.length t + S.length u)) =
+  if S.length s > 0 && S.length t > 0 && S.length u > 0 &&
+      S.index s 0 = S.index t 0 && S.index t 0 = S.index u 0 then
+    string_lt_trans (S.drop s 1) (S.drop t 1) (S.drop u 1)
+
 let rec string_index_of (s needle:string)
   : GTot (i:int{-1 <= i /\ i <= S.length s}) (decreases (S.length s)) =
   if startsWith s needle then 0 else

@@ -12,6 +12,7 @@ import type { RawExpr, RawStmt, RawFunction, RawModule, RawClass, RawConst, RawG
 import { normalizeBigIntLiteral } from "./rawir.js";
 import { setUserNames, freshName } from "./names.js";
 import { DEFAULT_OPTIONS, type LscOptions } from "./config.js";
+import { isNamespaceReference, sourceFunctions } from "./source-functions.js";
 
 // ── Expression extraction ────────────────────────────────────
 
@@ -49,6 +50,7 @@ const _externs = new Map<string, import("./rawir.js").RawExtern>();
  *  types would emit decls that no emitted declaration mentions. */
 const _externSigTypes: { type: Type; node: Node }[] = [];
 let _currentSourceFile: SourceFile | null = null;
+let _namespaceFunctions = new Map<Node, string>();
 /** True only while extracting a function body. Module-level constants that
  *  reference cross-file callees (e.g., `BusEvent.define(...)` inside a
  *  module-level record) would otherwise pollute the output with externs
@@ -420,6 +422,10 @@ function extractExpr(node: Expression): RawExpr {
   // Non-`?` continuation of an existing optChain extends the chain (no new
   // short-circuit, just keep evaluating after the prior `?` succeeded).
   if (Node.isPropertyAccessExpression(node)) {
+    const namespaceFunction = _namespaceFunctions.size && isNamespaceReference(node.getExpression())
+      ? node.getSymbol()?.getDeclarations().map(d => _namespaceFunctions.get(d)).find(name => name !== undefined)
+      : undefined;
+    if (namespaceFunction) return { kind: "var", name: namespaceFunction };
     const obj = extractExpr(node.getExpression());
     const field = node.getName();
     if (node.hasQuestionDotToken()) {
@@ -2043,6 +2049,10 @@ function extractFunctionInner(fn: FunctionDeclaration, parentAnnotations?: Annot
 
 export function extractModule(sourceFile: SourceFile, options: LscOptions = DEFAULT_OPTIONS): RawModule {
   _extractOptions = options;
+  const functionDeclarations = sourceFunctions(sourceFile);
+  _namespaceFunctions = new Map(functionDeclarations
+    .filter(fn => Node.isModuleBlock(fn.getParent()))
+    .flatMap(fn => [fn, ...fn.getOverloads()].map(decl => [decl, fn.getName()!] as const)));
   // Seed the fresh-name check (names.ts) before anything mints: every
   // Identifier token in the module, a deliberate over-approximation.
   setUserNames(new Set(sourceFile.getDescendantsOfKind(SyntaxKind.Identifier).map(i => i.getText())));
@@ -2198,7 +2208,7 @@ export function extractModule(sourceFile: SourceFile, options: LscOptions = DEFA
 
   // Collect all function-like declarations: function declarations + const arrow functions
   const allFns: { name: string; node: FunctionDeclaration; parentStmt?: Node }[] = [];
-  for (const fn of sourceFile.getFunctions()) {
+  for (const fn of functionDeclarations) {
     allFns.push({ name: fn.getName() ?? "<anonymous>", node: fn });
   }
   // const f = (...) => expr  OR  const f = (...) => { ... }

@@ -40,11 +40,12 @@ The five examples above use general application that the current Dafny/Lean lowe
 | Construct | Representation and limits |
 | --- | --- |
 | Numbers | Mathematical `int`, `nat`, `real`; `bigint` retains signed truncating division/remainder semantics. Bare numeric division is real division; `Math.floor(a/b)` rounds downward. Unsafe integer literals are rejected. |
-| Strings | Sequences of UTF-16 code units, including indexing, slicing, concatenation, searching and trimming. Unicode case conversion is a deterministic unconstrained library abstraction. |
+| Strings | Sequences of UTF-16 code units, including indexing, slicing, concatenation, searching, trimming and lexicographic comparison. The runtime proves string-order totality and transitivity. Unicode case conversion is a deterministic unconstrained library abstraction. |
 | Arrays | `FStar.Sequence`, with checked indexing, value updates, slicing, searching, map/filter/fold and sorting. Sorting requires a total preorder and preserves multiplicities. Runtime array identity comparison is rejected. |
 | Maps and sets | F* finite maps/sets. String keys use a proved sequence-to-list encoding to obtain decidable key equality. Iteration follows the existing unordered collection model. |
 | Data types | Options, tuples, records, tagged unions, enums, aliases and generics. Optional record fields default to `None`. Opaque values have no observable constructors. Runtime equality between potentially reference-valued operands is rejected; null/undefined checks remain supported. |
 | Functions | Pure, total ghost arrows, immutable captures, general application, function-valued records and returned functions. No captured-state mutation or function identity comparison. |
+| Namespaces | Function-only namespaces, including nesting and static qualified source calls. Function names must be unique across the file; namespace state, other namespace members and ambient namespaces are rejected. Selected bodies receive the same source checks as top-level functions. |
 | Control flow | Mutable locals and collection updates become fresh value bindings; conditionals and switches preserve scope. Loops become total recursive continuations, including break, continue and early return. |
 | Classes | Methods receive an explicit record representing `this` and return a result/state pair. Postconditions observe the updated state. This is not a shared-heap or aliasing model. |
 | Specifications | `requires`, `ensures`, `assert`, quantifiers, implication/equivalence, membership, loop invariants and decreases. Postconditions retain a result binder, including function-valued results. |

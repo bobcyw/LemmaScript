@@ -699,7 +699,7 @@ function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
         return { kind: "app", fn: "JSTruncDiv", args: [lowerExpr(e.left, binds), lowerExpr(e.right, binds)] };
       }
       // JS string ordering is lexicographic vs Dafny's seq prefix order, so route
-      // through JSStringLt. Dafny-only: Lean's native `<` is already lexicographic.
+      // through JSStringLt for Dafny/F*. Lean's native `<` is lexicographic.
       if (_opts.backend === "dafny" && ["<", "<=", ">", ">="].includes(e.op) && e.left.ty.kind === "string") {
         const l = lowerExpr(e.left, binds), r = lowerExpr(e.right, binds);
         const lt = (x: Expr, y: Expr): Expr => ({ kind: "app", fn: "JSStringLt", args: [x, y] });
