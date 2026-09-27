@@ -36,7 +36,7 @@ export const OPTION_SPECS = {
     values: ["unicode-scalar", "javascript-utf16"],
     default: "unicode-scalar",
     fileOverride: false,
-    description: "Which model of JavaScript strings a Dafny proof is made under (DESIGN_STRINGS.md).",
+    description: "Which model of JavaScript strings a Dafny proof is made under.",
   },
 } as const;
 
