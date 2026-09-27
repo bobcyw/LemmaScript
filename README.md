@@ -10,7 +10,7 @@ See our [blog post](https://midspiral.com/blog/lemmascript-a-verification-toolch
 
 ## Examples and Case Studies
 
-Each example and case study is verified in Lean 4 and/or Dafny from the same annotated TypeScript source.
+Each example and case study is verified in one or more of Lean 4, Dafny, and F* from annotated TypeScript source.
 
 See the internal [examples](examples).
 
@@ -103,6 +103,8 @@ Sources marked `//@ backend fstar` are skipped by the other backends. Companions
 [resultPipeline.ts](examples/resultPipeline.ts) uses generic `Result` values, `map`, and `flatMap` to validate an order and compute its total. Both backends prove that the first error wins, success requires valid quantity and price, and the total is their product; no proof additions are needed.
 
 [resultTypedErrors.ts](examples/resultTypedErrors.ts) gives the two validators distinct tagged error types and combines them into `QuantityError | PriceError`, preserving the error tag and original quantity or price. F* verifies without proof additions; Dafny uses two calls to the validators' proved lemmas.
+
+[compiler.ts](examples/compiler.ts) compiles expression trees into closures, preserving interpretation through constant folding and lexical bindings for every pure environment and continuation. Both Dafny and F* prove compiler correctness and verify clients with the compiler body hidden, including a nested-shadowing example.
 
 ## Continuous Integration
 

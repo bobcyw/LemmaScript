@@ -410,6 +410,19 @@ function expandAlias(ty: Ty, typeDecls: TypeDeclInfo[], seen: Set<string> = new 
   return ty;
 }
 
+/** Resolve a callable alias at a call site without erasing named types from
+ * declarations. This also supplies the callback's purity and result type. */
+function functionType(ty: Ty | undefined, typeDecls: TypeDeclInfo[], seen = new Set<string>()): Extract<Ty, { kind: "fn" }> | undefined {
+  if (ty?.kind === "fn") return ty;
+  if (ty?.kind !== "user") return undefined;
+  const app = typeApplication(ty.name);
+  const decl = declOfDotted(typeDecls, app?.name ?? ty.name);
+  if (decl?.kind !== "alias" || !decl.aliasOfTy || seen.has(decl.name)) return undefined;
+  const bindings = new Map((decl.typeParams ?? []).flatMap((name, i) =>
+    app?.args[i] ? [[name, app.args[i]] as const] : []));
+  return functionType(substituteTypeParams(decl.aliasOfTy, bindings), typeDecls, new Set([...seen, decl.name]));
+}
+
 function getDiscriminant(ctx: Ctx, typeName: string): string | undefined {
   return findDecl(ctx, typeName)?.discriminant;
 }
@@ -549,7 +562,7 @@ function classifyCall(fn: RawExpr, ctx: Ctx): CallKind {
       return "method";
     }
   }
-  if (fn.kind === "var" && lookup(ctx.env, fn.name)?.kind === "fn") return "pure";
+  if (fn.kind === "var" && functionType(lookup(ctx.env, fn.name), ctx.typeDecls)) return "pure";
   if (fn.kind === "var" && ctx.inSpec) {
     // Not a known pure function — could be external (Lean-defined spec helper).
     // Pass through as "pure" and let Lean catch any errors.
@@ -953,7 +966,9 @@ function resolveExpr(e: RawExpr, ctx: Ctx, returnedType?: Ty): TExpr {
           };
         }
       }
-      const fn = resolveExpr(e.fn, ctx);
+      let fn = resolveExpr(e.fn, ctx);
+      const signature = functionType(fn.ty, ctx.typeDecls);
+      if (signature) fn = { ...fn, ty: signature };
       const rawArgs = inferLambdaParamTypes(fn, e.args, ctx);
       // For .push() on a typed array, resolve args with element type context
       let argCtx = ctx;

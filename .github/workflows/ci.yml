@@ -85,7 +85,7 @@ jobs:
       - name: F* regression tests (including rejected contracts)
         env:
           LSC_REQUIRE_FSTAR: '1'
-        run: node --import tsx --test tools/tests/fstar.test.ts
+        run: node --import tsx --test tools/tests/fstar.test.ts tools/tests/compiler.test.ts
 
       - name: Verify F* examples and check artifact drift
         run: |

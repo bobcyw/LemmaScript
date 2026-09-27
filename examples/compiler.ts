@@ -1,4 +1,4 @@
-//@ backend fstar
+//@ backend dafny,fstar
 
 /**
  * A verified compiler from expression trees to continuation-passing closures.
