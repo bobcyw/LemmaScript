@@ -174,12 +174,11 @@ function mapTStmt(s: TStmt, f: (e: TExpr) => TExpr | null): TStmt {
 
 // ── Backend configuration ───────────────────────────────────
 
-export type Backend = "lean" | "dafny";
+export type Backend = "lean" | "dafny" | "fstar";
 
 export interface TransformOptions {
   backend: Backend;
   monadic: boolean;
-  nativeContracts?: boolean;
 }
 
 export const LEAN_OPTIONS: TransformOptions = {
@@ -189,6 +188,11 @@ export const LEAN_OPTIONS: TransformOptions = {
 
 export const DAFNY_OPTIONS: TransformOptions = {
   backend: "dafny",
+  monadic: false,
+};
+
+export const FSTAR_OPTIONS: TransformOptions = {
+  backend: "fstar",
   monadic: false,
 };
 
@@ -449,7 +453,7 @@ function buildNestedFieldUpdate(recv: TExpr, newVal: Expr): { root: string; valu
 
 function lowerExpr(e: TExpr, binds: Stmt[] | null): Expr {
   const result = lowerExprInner(e, binds);
-  return _opts.nativeContracts ? { ...result, ty: e.ty } : result;
+  return _opts.backend === "fstar" ? { ...result, ty: e.ty } : result;
 }
 
 function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
@@ -681,9 +685,9 @@ function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
       if (e.op === "+" && (e.left.ty.kind === "string" || e.right.ty.kind === "string")) {
         const strify = (o: TExpr): Expr => {
           if (o.ty.kind !== "int" && o.ty.kind !== "nat") return lowerExpr(o, binds);
-          // Lean `toString` handles any Int; Dafny needs IntToString for signed
+          // Lean `toString` handles any Int; Dafny/F* use IntToString for signed
           // ints (NatToString is nat-only).
-          const fn = _opts.backend !== "dafny" ? "ToString" : o.ty.kind === "nat" ? "NatToString" : "IntToString";
+          const fn = _opts.backend === "lean" ? "ToString" : o.ty.kind === "nat" ? "NatToString" : "IntToString";
           return { kind: "app", fn, args: [lowerExpr(o, binds)] };
         };
         return { kind: "binop", op: "arrayConcat", left: strify(e.left), right: strify(e.right) };
@@ -700,7 +704,7 @@ function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
       }
       // JS string ordering is lexicographic vs Dafny's seq prefix order, so route
       // through JSStringLt for Dafny/F*. Lean's native `<` is lexicographic.
-      if (_opts.backend === "dafny" && ["<", "<=", ">", ">="].includes(e.op) && e.left.ty.kind === "string") {
+      if ((_opts.backend === "dafny" || _opts.backend === "fstar") && ["<", "<=", ">", ">="].includes(e.op) && e.left.ty.kind === "string") {
         const l = lowerExpr(e.left, binds), r = lowerExpr(e.right, binds);
         const lt = (x: Expr, y: Expr): Expr => ({ kind: "app", fn: "JSStringLt", args: [x, y] });
         const not = (x: Expr): Expr => ({ kind: "unop", op: "¬", expr: x });
@@ -796,7 +800,7 @@ function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
         const method = e.ty.kind !== "optional" ? "getDirect" : "get";
         return { kind: "methodCall", obj: transformExpr(e.obj), objTy: e.obj.ty, method, args: [idx], monadic: false };
       }
-      const wrappedIdx = !_opts.nativeContracts && isArray(e.obj.ty) && !isNat(e.idx.ty) ? { kind: "toNat" as const, expr: idx } : idx;
+      const wrappedIdx = _opts.backend !== "fstar" && isArray(e.obj.ty) && !isNat(e.idx.ty) ? { kind: "toNat" as const, expr: idx } : idx;
       return { kind: "index", arr: transformExpr(e.obj), idx: wrappedIdx };
     }
 
@@ -849,7 +853,7 @@ function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
       }
       // Math.floor(x):
       //   - a / b on integral operands → integer floor division, kept in
-      //     integer arithmetic (JSFloorDiv on Dafny; native Int/Nat `/` floors
+      //     integer arithmetic (JSFloorDiv on Dafny/F*; native Int/Nat `/` floors
       //     on Lean). Checked first: after resolve, `a / b` is typed `real`, so
       //     the real branch below would otherwise drag it into real arithmetic.
       //   - real arg → FloorReal (Dafny's .Floor)
@@ -858,9 +862,9 @@ function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
         const arg = e.args[0];
         if (arg.kind === "binop" && arg.op === "/" && isIntegral(arg.left.ty) && isIntegral(arg.right.ty)) {
           const l = lowerExpr(arg.left, binds), r = lowerExpr(arg.right, binds);
-          return _opts.backend === "dafny"
-            ? { kind: "app", fn: "JSFloorDiv", args: [l, r] }
-            : { kind: "binop", op: "/", left: l, right: r };
+          return _opts.backend === "lean"
+            ? { kind: "binop", op: "/", left: l, right: r }
+            : { kind: "app", fn: "JSFloorDiv", args: [l, r] };
         }
         if (arg.ty.kind === "real")
           return { kind: "app", fn: "FloorReal", args: [lowerExpr(arg, binds)] };
@@ -885,7 +889,7 @@ function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
           // Array index args must be nat in Lean: `with`'s index (0), includes/indexOf `from` (1)
           // — registry `intArgPositions`.
           const isArrIdxArg = spec?.intArgPositions !== undefined && spec.intArgPositions.includes(i);
-          if (isArrIdxArg && !isNat(a.ty) && !_opts.nativeContracts) return { kind: "toNat" as const, expr: lowered };
+          if (isArrIdxArg && !isNat(a.ty) && _opts.backend !== "fstar") return { kind: "toNat" as const, expr: lowered };
           return lowered;
         });
         // arr.concat(...args): each array arg is spread, each value arg appended.
@@ -921,7 +925,7 @@ function lowerExprInner(e: TExpr, binds: Stmt[] | null): Expr {
         }
         return result;
       }
-      if (e.fn.kind !== "var" && (_opts.nativeContracts || _opts.backend === "dafny" && e.fn.ty.kind === "fn")) {
+      if (e.fn.kind !== "var" && (_opts.backend === "fstar" || _opts.backend === "dafny" && e.fn.ty.kind === "fn")) {
         // Applying a returned/selected function uses the same named-call IR as
         // a source local, evaluating the callee once before its arguments.
         const callee = freshName("_callee");
@@ -2482,8 +2486,12 @@ export function transformModuleDafny(mod: TModule): { typesFile: Module | null; 
 /** Shared value/collection lowering, retaining F* result binders and types. */
 export function transformModuleFstar(mod: TModule): { typesFile: Module | null; defFile: Module } {
   const prev = _opts;
-  _opts = { ...DAFNY_OPTIONS, nativeContracts: true };
-  try { return transformModule(mod); } finally { _opts = prev; }
+  _opts = FSTAR_OPTIONS;
+  try {
+    return transformModule(mod);
+  } finally {
+    _opts = prev;
+  }
 }
 
 export function transformModule(mod: TModule, specImport?: string, moduleBaseOverride?: string): { typesFile: Module | null; defFile: Module } {
@@ -2511,7 +2519,7 @@ export function transformModule(mod: TModule, specImport?: string, moduleBaseOve
     if (body) {
       // For pure-function lemmas, replace \result with the function call.
       const fnCall: Expr = { kind: "app", fn: fn.name, args: fn.params.map(p => ({ kind: "var" as const, name: p.name })) };
-      const ensures = fn.ensures.map(e => _opts.nativeContracts ? transformExpr(e) : replaceVar(transformExpr(e), "\\result", fnCall));
+      const ensures = fn.ensures.map(e => _opts.backend === "fstar" ? transformExpr(e) : replaceVar(transformExpr(e), "\\result", fnCall));
       pureDefs.push({
         kind: "def",
         name: fn.name,
@@ -2559,7 +2567,7 @@ export function transformModule(mod: TModule, specImport?: string, moduleBaseOve
       params: ext.params.map(p => ({ name: p.name, type: p.ty })),
       returnType: ext.returnTy,
       requires: ext.requires.map(transformExpr),
-      ensures: ext.ensures.map(e => ext.impure || _opts.nativeContracts
+      ensures: ext.ensures.map(e => ext.impure || _opts.backend === "fstar"
         ? transformExpr(e)
         : replaceVar(transformExpr(e), "\\result", fnCall)),
       impure: ext.impure,
