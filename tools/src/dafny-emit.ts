@@ -840,7 +840,10 @@ function emitDecl(d: Decl): string {
     }
 
     case "type-alias": {
-      return `type ${escapeName(d.name)} = ${tyToDafny(d.target)}`;
+      // Aliases may use parameters left of an arrow. Keep them invariant
+      // without Dafny's default cardinality-preservation restriction.
+      const tp = d.typeParams?.length ? `<${d.typeParams.map(p => `!${p}`).join(", ")}>` : "";
+      return `type ${escapeName(d.name)}${tp} = ${tyToDafny(d.target)}`;
     }
 
     case "opaque-type": {

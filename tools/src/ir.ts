@@ -182,6 +182,7 @@ export interface ConstDecl {
 export interface TypeAlias {
   kind: "type-alias";
   name: string;
+  typeParams?: string[];
   target: Ty;
 }
 

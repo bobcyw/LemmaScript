@@ -2376,6 +2376,7 @@ function transformTypeDecl(d: TypeDeclInfo): Decl {
   } else if (d.kind === "alias") {
     return {
       kind: "type-alias", name: d.name,
+      typeParams: d.typeParams,
       target: d.aliasOfTy!,
     };
   } else if (d.kind === "opaque") {
@@ -2682,10 +2683,9 @@ export function transformModule(mod: TModule, specImport?: string, moduleBaseOve
   };
   const knownTypeNames = new Set<string>(typeDecls.map(d => (d as { name: string }).name));
   const allTypeParams = new Set<string>();
-  // Exclude type params from the *source* decls — the transformed IR drops
-  // them for aliases (`type Step<S, A> = …`), and a generic alias's params
-  // must not be mistaken for imported types. Params may carry a `//@ type`
-  // decoration ("S(==)"); references collect as the bare name, so strip it.
+  // Declaration type params must not be mistaken for imported types.
+  // Params may carry a `//@ type` decoration ("S(==)"); references collect
+  // as the bare name, so strip it.
   const addTp = (tp: string): void => { allTypeParams.add(tp.replace(/\(.*$/, "").trim()); };
   for (const d of mod.typeDecls) d.typeParams?.forEach(addTp);
   for (const d of typeDecls) {

@@ -484,7 +484,7 @@ export function emitFstarFile(mod:TModule, moduleName:string):string {
     if(d.kind==="structure")typeTexts.push(`${hasEq({kind:"user",name:d.name})?"":"noeq "}type ${n(d.name)} ${(d.typeParams??[]).map(p=>`(${n(p)}:Type)`).join(" ")} = {\n${d.fields.map(f=>`  ${field(d.name,f.name)}: ${type(f.type)};`).join("\n")}\n}\n`);
     if(d.kind==="inductive")typeTexts.push(`${hasEq({kind:"user",name:d.name})?"":"noeq "}type ${n(d.name)} ${(d.typeParams??[]).map(p=>`(${n(p)}:Type)`).join(" ")} =\n${d.constructors.map(x=>`| ${ctor(x.name,d.name)} : ${x.fields.map(f=>type(f.type)+" -> ").join("")}${n(d.name)} ${(d.typeParams??[]).map(n).join(" ")}`).join("\n")}\n`);
     if(d.kind==="type-alias"){
-      const ps=mod.typeDecls.find(x=>x.name===d.name)?.typeParams??[];
+      const ps=d.typeParams??[];
       typeTexts.push(`type ${n(d.name)} ${ps.map(p=>`(${n(p)}:Type)`).join(" ")} = ${type(d.target)}\n`);
     }
     if(d.kind==="opaque-type")typeTexts.push(`// Abstract source type; no constructors or operations are exposed.\nassume val ${n(d.name)} : eqtype\n`);

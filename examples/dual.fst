@@ -10,6 +10,8 @@ open FStar.FiniteSet.Ambient
 open FStar.FiniteMap.Ambient
 open FStar.Real
 
+type v_Predicate (v_A:Type) = (v_A -> GTot bool)
+
 type v_Account  = {
   f_v_Account_v_member: bool;
   f_v_Account_v_suspended: bool;
@@ -32,8 +34,8 @@ let v_dual (#v_A:Type) (#v_B:Type) (#v_R:Type) (v_body:(v_A -> v_B -> GTot v_R))
     (fun (v_self:v_A) ->
       (v_body (v_self) (v_that))))
 
-let v_denyOverride (#v_A:Type) (v_self:(v_A -> GTot bool)) (v_denied:(v_A -> GTot bool))
-  : Ghost (v_A -> GTot bool)
+let v_denyOverride (#v_A:Type) (v_self:(v_Predicate v_A)) (v_denied:(v_Predicate v_A))
+  : Ghost (v_Predicate v_A)
       (requires (
         True
       ))
@@ -43,8 +45,8 @@ let v_denyOverride (#v_A:Type) (v_self:(v_A -> GTot bool)) (v_denied:(v_A -> GTo
   (fun (v_value:v_A) ->
     ((v_self (v_value)) && (not (v_denied (v_value)))))
 
-let v_mapInput (#v_A:Type) (#v_B:Type) (v_self:(v_A -> GTot bool)) (v_project:(v_B -> GTot v_A))
-  : Ghost (v_B -> GTot bool)
+let v_mapInput (#v_A:Type) (#v_B:Type) (v_self:(v_Predicate v_A)) (v_project:(v_B -> GTot v_A))
+  : Ghost (v_Predicate v_B)
       (requires (
         True
       ))
@@ -54,23 +56,23 @@ let v_mapInput (#v_A:Type) (#v_B:Type) (v_self:(v_A -> GTot bool)) (v_project:(v
   (fun (v_value:v_B) ->
     (v_self ((v_project (v_value)))))
 
-let v_curriedPolicy (#v_A:Type) (#v_B:Type) (v_eligible:(v_A -> GTot bool)) (v_denied:(v_A -> GTot bool)) (v_project:(v_B -> GTot v_A))
-  : Ghost (v_B -> GTot bool)
+let v_curriedPolicy (#v_A:Type) (#v_B:Type) (v_eligible:(v_Predicate v_A)) (v_denied:(v_Predicate v_A)) (v_project:(v_B -> GTot v_A))
+  : Ghost (v_Predicate v_B)
       (requires (
         True
       ))
       (ensures (fun ls_result ->
         (forall (v_value:v_B). ((ls_result (v_value)) == ((v_eligible ((v_project (v_value)))) && (not (v_denied ((v_project (v_value))))))))
       )) =
-  (let v_denyLast_22 = (v_dual ((fun (v_self:(v_A -> GTot bool)) (v_denied:(v_A -> GTot bool)) ->
+  (let v_denyLast_22 = (v_dual ((fun (v_self:(v_Predicate v_A)) (v_denied:(v_Predicate v_A)) ->
     (v_denyOverride (v_self) (v_denied))))) in
-  (let v_mapLast_25 = (v_dual ((fun (v_self:(v_A -> GTot bool)) (v_project:(v_B -> GTot v_A)) ->
+  (let v_mapLast_25 = (v_dual ((fun (v_self:(v_Predicate v_A)) (v_project:(v_B -> GTot v_A)) ->
     (v_mapInput (v_self) (v_project))))) in
   (let v_withDenial_28 = (v_denyLast_22 (v_denied)) in
   (let v_onInput_29 = (v_mapLast_25 (v_project)) in
   (v_onInput_29 ((v_withDenial_28 (v_eligible))))))))
 
-let v_callingFormsAgree (#v_A:Type) (#v_B:Type) (v_eligible:(v_A -> GTot bool)) (v_denied:(v_A -> GTot bool)) (v_project:(v_B -> GTot v_A)) (v_value:v_B)
+let v_callingFormsAgree (#v_A:Type) (#v_B:Type) (v_eligible:(v_Predicate v_A)) (v_denied:(v_Predicate v_A)) (v_project:(v_B -> GTot v_A)) (v_value:v_B)
   : Ghost bool
       (requires (
         True

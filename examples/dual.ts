@@ -8,9 +8,7 @@ export function dual<A, B, R>(body: (self: A, that: B) => R): (that: B) => (self
   return (that: B): ((self: A) => R) => (self: A): R => body(self, that);
 }
 
-export interface Predicate<A> {
-  (value: A): boolean;
-}
+export type Predicate<A> = (value: A) => boolean;
 
 export function denyOverride<A>(self: Predicate<A>, denied: Predicate<A>): Predicate<A> {
   //@ ensures forall(value: A, \result(value) === (self(value) && !denied(value)))

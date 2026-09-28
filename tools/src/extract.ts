@@ -924,7 +924,7 @@ function extractTypeDecl(decl: TypeAliasDeclaration, extraDecls?: TypeDeclInfo[]
       // needs `name: T` syntax; bare `T` is read as a param name with `any`.
       const params = sig.getParameters().map((p, i) => `_p${i}: ${typeToString(p.getTypeAtLocation(decl))}`);
       const ret = typeToString(sig.getReturnType());
-      return { name, kind: "alias", aliasOf: `(${params.join(", ")}) => ${ret}` };
+      return { name, typeParams: tpField, kind: "alias", aliasOf: `(${params.join(", ")}) => ${ret}` };
     }
   }
   // Array-type alias: `type Board = number[]` → alias to the seq type, not a
