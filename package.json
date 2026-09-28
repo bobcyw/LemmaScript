@@ -16,6 +16,7 @@
   "scripts": {
     "build": "tsc -p tools/tsconfig.json",
     "prepublishOnly": "npm run build",
+    "test": "node --import tsx --test tools/tests/*.test.ts",
     "typecheck": "tsc -p tools/tsconfig.json --noEmit",
     "typecheck:examples": "tsc -p examples/tsconfig.json"
   },
