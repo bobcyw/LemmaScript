@@ -1,6 +1,6 @@
 # DESIGN_CONFIG — Project options via `lemmascript.json`
 
-**Status:** initial implementation complete. The registry, `extern-default`, `safe-slice`, `proof-dir`, file overrides, and `lsc config` are implemented. #211 (Dafny strings as JavaScript UTF-16 code units) and #205 (JavaScript number semantics) remain future users of the mechanism and are not implemented here.
+**Status:** implemented. The registry supports `extern-default`, `safe-slice`, `proof-dir`, file overrides, and `lsc config`. PR #211 adds `string-semantics` and `dafny-library`, including their compatibility check. #205 (JavaScript number semantics) remains a future user of the mechanism.
 **Date:** August 2026
 
 ## Requirements
@@ -50,6 +50,8 @@ export const OPTION_SPECS = {
   "extern-default": { type: "enum", values: ["pure", "impure"], default: "pure", fileOverride: true, description: "…" },
   "safe-slice":     { type: "boolean", default: false, fileOverride: true, directiveAliases: ["safe-slice"], description: "…" },
   "proof-dir":      { type: "path", default: null, fileOverride: false, description: "…" },
+  "string-semantics": { type: "enum", values: ["unicode-scalar", "javascript-utf16"], default: "unicode-scalar", fileOverride: false, description: "…" },
+  "dafny-library":  { type: "enum", values: ["stdlib", "local"], default: "stdlib", fileOverride: false, description: "…" },
 } as const;
 
 export type LscOptions = { readonly [K in keyof typeof OPTION_SPECS]: /* boolean | enum union | string | null */ };
@@ -58,12 +60,12 @@ export const DEFAULT_OPTIONS: LscOptions;
 
 export function validateOptions(raw: unknown, source: string): ExplicitOptions; // per-key checks; returns only explicit keys
 export function parseFileOptions(sourceText: string, source: string): ExplicitOptions;
-export function resolveOptions(explicit: ExplicitOptions, source: string): LscOptions; // defaults + dependent defaults + cross-key checks
+export function resolveOptions(explicit: ExplicitOptions, source: string): LscOptions; // defaults + cross-key checks
 export function loadConfigOptions(sourcePath: string, configPath?: string): { explicit: ExplicitOptions; configFile: string | null };
 export function resolveDafnyArtifactDir(sourcePath: string, configFile: string | null, options: LscOptions): string;
 ```
 
-`validateOptions` and `parseFileOptions` return only the keys that were present. `lsc.ts` merges those two partial objects, file over config, and calls `resolveOptions` once, so future dependent defaults can distinguish an explicit setting from a default. `resolveOptions` applies dependent defaults and then rejects cross-key contradictions; the message names the conflicting explicit settings and the fix. The file parser uses the registry's types, enum values, and `fileOverride` field rather than maintaining a second switch; its only special cases come from declared `directiveAliases`. The `path` type accepts a non-empty relative string; the artifact helper anchors it at the selected config file and performs the containment check from §3.3.
+`validateOptions` and `parseFileOptions` return only the keys that were present. `lsc.ts` merges those two partial objects, file over config, and calls `resolveOptions`. It fills registry defaults and then rejects cross-key contradictions; the message names the conflicting settings and the fix. The file parser uses the registry's types, enum values, and `fileOverride` field rather than maintaining a second switch; its only special cases come from declared `directiveAliases`. The `path` type accepts a non-empty relative string; the artifact helper anchors it at the selected config file and performs the containment check from §3.3.
 
 Adding an independent option is: one registry entry, then `options["<key>"]` in the consuming phase, then a row in SPEC.md §7 and a fixture. An interacting option also adds its dependent-default or incompatibility rule to `resolveOptions` and a negative fixture; consumers still receive only a valid, fully resolved set.
 
@@ -102,21 +104,24 @@ The source must be inside the config directory when `proof-dir` is set (includin
 
 Enabling the option must not silently strand proof additions. If the mapped `.dfy` is absent but a sibling `.dfy`, `.dfy.base`, or `.dfy.merged` exists beside the TS, `lsc` fails with paths and tells the user to move the hand-written `.dfy`, discard or inspect merge-state files, and rerun; `.dfy.gen` is regeneratable. Changing from one non-default proof directory to another likewise requires moving the proof first and is documented as a migration, because the new config cannot discover an arbitrary old root.
 
-## Future options (not part of the initial implementation)
+## String and collection options (PR #211, issue #210)
 
-The registry and resolution path are intended to accept the following options later, but this proposal does not add their keys, change their emitters, add verifier flags, or add their fixtures.
+`string-semantics: "unicode-scalar" | "javascript-utf16"` chooses the string model,
+defaulting to `unicode-scalar`. `dafny-library: "stdlib" | "local"` independently chooses
+the generated collection helpers, defaulting to `stdlib`. Both are config-only.
 
-### `javascript-utf16` and `dafny-lib` (PR #211, issue #210)
+`stdlib` emits `Std.Collections.Seq.Filter/All/FoldLeft` for `filter`/`every`/`reduce`;
+`local` emits `SeqFilter`/`SeqAll`/`SeqFoldLeft` definitions on demand. Unicode-scalar
+projects may select either. UTF-16 requires an explicit `local` choice: `resolveOptions`
+rejects both an omitted and an explicit `stdlib`, without silently changing the default.
 
-A later `javascript-utf16: true` option would gate PR #211's Dafny emitter behavior:
+UTF-16 string-bearing artifacts record their model in the header; verification uses
+`--unicode-char:false --allow-deprecation`. The precompiled Dafny standard library uses
+Unicode-scalar characters and cannot load in that mode. The artifact-level check still
+rejects `Std.*` in UTF-16 proof additions; config validation cannot inspect handwritten
+proof text. The library choice itself requires no additional verifier flag.
 
-- `string` types and `str` literals set a per-emission flag; literals are written as `\uXXXX` code-unit escapes for everything outside printable ASCII, so astral pairs and lone surrogates survive the UTF-8 file.
-- Preambles that mention chars vary with the mode. This is forced, not stylistic: Dafny 4.11 rejects `\U{…}` escapes under `--unicode-char:false` and `\u…` escapes under the default, so `IsJSWhitespace` (StringTrim) must be emitted with `\u0009…` in UTF-16 mode and `\U{0009}…` otherwise, and `StringFromCharCode`'s `requires` is `0 <= n < 0x10000` vs the surrogate-free scalar range. `PREAMBLE_CODE` entries become `string | (options) => string`.
-- The file header records the model (§5), and `dafnyVerify` passes `--unicode-char:false --allow-warnings` when it sees it. `--allow-warnings` is required: 4.11 prints a deprecation warning for the flag and, by default, a warning fails the run.
-
-A future `dafny-lib` option would select where `filter`/`every`/`reduce` come from: `Std.Collections.Seq.Filter/All/FoldLeft` (today; `dafnyVerify` already auto-adds `--standard-libraries` on a `Std.` substring) or the local `SeqFilter`/`SeqAll`/`SeqFoldLeft` recursive helpers from PR #211, emitted into the preamble on demand like `SeqFind`.
-
-The two would interact: Dafny's precompiled standard library is built for Unicode-scalar chars and cannot load under `--unicode-char:false`. After config and file layers are merged, `resolveOptions` must implement exactly this rule: if `javascript-utf16` is true and `dafny-lib` is absent, supply the dependent default `local-lib`; if `dafny-lib` is explicitly `std-lib`, reject the combination and name both keys. An explicit incompatible choice is never silently replaced. PR #211's per-file fail-closed check would stay as the last line of defense (a UTF-16 file whose *proof additions* import `Std.*`), because the config can't see hand-written proof text; its message should name the config key. A string-free file could keep importing `Std.*` in its proofs: the header marker would only be emitted when strings actually appear.
+## Future options
 
 ### `number-semantics` (issue #205)
 
@@ -130,25 +135,25 @@ JavaScript numbers need an enum-shaped semantic choice, not a `javascript-number
 | `extract.ts` | `extractModule(sourceFile, options = DEFAULT_OPTIONS)`; module-level `_options` set on entry, following the existing `_externs` reset pattern; `externIsImpure` reads it. |
 | `resolve`, `narrow`, `autohavoc`, `peephole` | Unchanged initially. Add an `options` parameter only when a future option needs one. |
 | `transform.ts` | Unchanged. `TransformOptions { backend, monadic }` is backend-intrinsic pipeline configuration; keep it separate rather than merging `LscOptions` into it. |
-| `dafny-emit.ts` | `emitDafnyFile(file, tsFileName, options = DEFAULT_OPTIONS)` replaces the `{ safeSlice }` bag; `_useSafeSlice` becomes `_options["safe-slice"]`. No other emission changes are part of this proposal. |
-| `dafny-commands.ts` | Algorithms are unchanged; `lsc.ts` passes mapped artifact paths and uses the mapped directory as the verifier/regen working directory. Artifact-derived verifier flags belong to the future options in §5. |
-| `lean-emit.ts` | Error text only. Dafny-only options are ignored under Lean without a warning — a per-file warning would be noise in batch mode, and the docs table carries the backend column. |
+| `dafny-emit.ts` | `emitDafnyFile(file, tsFileName, options = DEFAULT_OPTIONS)` receives resolved settings and applies the shared compatibility check for programmatic callers. Each emission resets its safe-slice, string, and collection-library state from those settings. |
+| `dafny-commands.ts` | `lsc.ts` passes mapped artifact paths and uses the mapped directory as the verifier/regen working directory. The generated artifact's options header determines verifier flags (§5). |
+| `lean-emit.ts` | The CLI rejects UTF-16 because Lean has no matching string model. Other Dafny-only settings do not affect Lean emission. |
 | `info-command.ts` | `lsc info --typed` gains a top-level `options` field (the effective set). Additive, so `schema` stays `1`. |
 
 Optional-with-default parameters keep any external programmatic caller of `extractModule`/`emitDafnyFile` working; the CLI always passes explicitly.
 
-## 5. Future artifact headers
+## 5. Artifact headers
 
-The initial options do not require non-default verifier flags, so this proposal does not change generated headers or `dafnyVerify`. When a future option does require flags, preserve PR #211's idea — the artifact, not the config, is what a human hands to `dafny verify` — but generalize the form so each option does not invent another sentence:
+Options requiring non-default verifier flags are recorded in the artifact, so a standalone proof keeps its interpretation without reading the project config:
 
 ```
 // Generated by lsc from foo.ts
-// lsc options: javascript-utf16
+// lsc options: string-semantics=javascript-utf16
 ```
 
-The future line is space-separated `key` (boolean) or `key=value` tokens, listing only non-default options that *materially affected this file* (UTF-16 would appear only when the file has strings; `dafny-lib` would never appear because it changes emitted helpers, not verifier flags). `dafnyVerify` would parse the line and map tokens to flags: `javascript-utf16` → `--unicode-char:false --allow-warnings`; a future `number-semantics=javascript` marker would select the version/capability checks and any flags established by the number-backend spike. The additions-only check already guarantees `.dfy` and `.dfy.gen` share the header, so flipping an option in `lemmascript.json` would surface as an ordinary generator change: `regen` three-way-merges the new header line in, then verifies under the new flags.
+The line contains space-separated option tokens. UTF-16 appears only when the file has strings and selects `--unicode-char:false --allow-deprecation`. `dafny-library` does not need a token because it changes emitted helpers, not verifier flags. A future number-model marker can use the same mechanism. The additions-only check guarantees `.dfy` and `.dfy.gen` share the header, so changing a model surfaces as a generator change: `regen` merges the new header before verification.
 
-Reading future flags from the artifact rather than from the config is deliberate: the two could not drift within one `lsc check`, while a standalone `.dfy` (a fixture, a file someone pulled out of a repo) would still verify correctly and a reader would see the model on line 2.
+Without a string-model token, verification explicitly uses `--unicode-char:true`. Existing scalar artifacts therefore need no header change.
 
 ## 6. CLI surface
 
@@ -167,7 +172,7 @@ Reading future flags from the artifact rather than from the config is deliberate
 - **`extern-default`** generalizes the existing explicit `//@ impure` path and adds config/directive fixtures and conditional docs. No default-flipping PR or regenerated examples are needed; existing examples keep their explicit `//@ impure`, and unmarked externs remain pure.
 - **Existing `safe-slice`** moves from an emitter-specific boolean into the registry without changing generated output. Its old directive remains an alias.
 - **`proof-dir`** adds path routing only; it does not change emitter text or the additions-only/regen algorithms. Existing projects stay beside-source until they opt in and move their hand-written proofs.
-- **#211 and #205** do not land as part of this proposal. When their encodings are ready, they add registry entries and the explicitly future emitter/header work above, with their own fixtures and docs.
+- **#211** adds string models and collection-library selection through the same registry and artifact mechanism. **#205** remains a future number-model extension.
 - **Flipping a default later:** change the registry line, run `./regen-dafny.sh`, and note it in the release. Projects that want the old model add one key. The registry's `default` field is where that decision lives, visibly, rather than being implicit in emitter code.
 
 ## Non-goals
@@ -175,7 +180,7 @@ Reading future flags from the artifact rather than from the config is deliberate
 - Per-function option overrides. `//@ option` is file-level; function facts keep their specific annotations.
 - A `backend` config option. `--backend=` selects the command target and `//@ backend` declares file membership; neither is a semantic model option.
 - Relocating Lean artifacts with `proof-dir`. Lean paths participate in module names and Lake roots, unlike standalone Dafny files, so that needs its own design.
-- Implementing `javascript-utf16`, `dafny-lib`, or `number-semantics`; they are future applications documented above, not initial registry entries.
+- Implementing `number-semantics`; it remains a future application documented above.
 - Nested/namespaced config (`{"dafny": {…}}`). Flat kebab-case keys with a backend column in the docs are enough for the initial options; revisit past ~15.
 - `time-limit` / `extra-flags` as project defaults. `LemmaScript-files.txt` already carries them per file; adding a project-wide default is a registry entry away if a case study asks.
 - JSON Schema generation (`lsc config --schema`). Cheap follow-up from the registry; not needed to land.
@@ -183,6 +188,6 @@ Reading future flags from the artifact rather than from the config is deliberate
 
 ## Open questions
 
-1. **Future string option shape.** Should `javascript-utf16` be a boolean or should a later proposal use `strings: "unicode-scalar" | "javascript-utf16"`? This does not block the initial config implementation.
-2. **Future `--allow-warnings` scope.** UTF-16 mode would need it for Dafny's `--unicode-char` deprecation warning, but it also un-fatals every other warning in the file. Resolve this with the UTF-16 implementation, not here.
-3. **Future header parsing.** When artifact-derived flags exist, should `dafnyVerify` warn when a `.dfy` lacks the `// Generated by lsc` line entirely? Resolve this with the first option that needs such a header.
+1. **Resolved string option shape.** `string-semantics: "unicode-scalar" | "javascript-utf16"` selects the string model. The independent `dafny-library` option selects collection helpers.
+2. **Resolved warning scope.** UTF-16 uses `--allow-deprecation` for Dafny's character-mode flag. Other warnings remain fatal.
+3. **Header parsing.** Should `dafnyVerify` warn when a `.dfy` lacks the `// Generated by lsc` line entirely? It currently accepts such files and uses the default string model when no options header is present.

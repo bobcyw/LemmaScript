@@ -145,7 +145,7 @@ for (const [directive, message] of [
   ["option", "expected //@ option <key> <value>"],
   ["option safe-slice", "expected //@ option <key> <value>"],
   ["option safe-slice true extra", "expected //@ option <key> <value>"],
-  ["option missing true", "unknown option 'missing' (known options: extern-default, safe-slice, proof-dir, string-semantics)"],
+  ["option missing true", "unknown option 'missing' (known options: extern-default, safe-slice, proof-dir, string-semantics, dafny-library)"],
   ["option safe-slice yes", "option 'safe-slice' must be true or false"],
   ["option extern-default invalid", "option 'extern-default' must be one of: pure, impure"],
   ["option proof-dir proofs", "option 'proof-dir' is config-only"],
@@ -188,4 +188,34 @@ test("string-semantics is config-only: a file cannot reinterpret a callee's stri
     () => parseFileOptions("//@ option string-semantics javascript-utf16\n", "example.ts"),
     /config-only/,
   );
+});
+
+test("Dafny library defaults to stdlib and local works with scalar strings", () => {
+  assert.equal(resolveOptions({}, "lemmascript.json")["dafny-library"], "stdlib");
+  const options = resolveOptions(validateOptions({ "dafny-library": "local" }, "lemmascript.json"), "lemmascript.json");
+  assert.equal(options["dafny-library"], "local");
+  assert.equal(options["string-semantics"], "unicode-scalar");
+  assert.ok(Object.isFrozen(options));
+});
+
+for (const library of [undefined, "stdlib"] as const) {
+  test(`UTF-16 rejects ${library === undefined ? "the default" : "explicit"} stdlib choice`, () => {
+    const explicit = library === undefined
+      ? { "string-semantics": "javascript-utf16" }
+      : { "string-semantics": "javascript-utf16", "dafny-library": library };
+    assert.throws(() => resolveOptions(validateOptions(explicit, "lemmascript.json"), "lemmascript.json"),
+      /lemmascript\.json:.*"string-semantics": "javascript-utf16".*"dafny-library": "stdlib".*"local" explicitly/);
+  });
+}
+
+test("UTF-16 requires an explicit local library choice", () => {
+  const explicit = validateOptions({ "string-semantics": "javascript-utf16", "dafny-library": "local" }, "lemmascript.json");
+  assert.equal(resolveOptions(explicit, "lemmascript.json")["dafny-library"], "local");
+});
+
+test("Dafny library accepts only registered values and is config-only", () => {
+  for (const value of [true, "standard", null]) {
+    assert.throws(() => validateOptions({ "dafny-library": value }, "lemmascript.json"), /must be one of: stdlib, local/);
+  }
+  assert.throws(() => parseFileOptions("//@ option dafny-library local\n", "example.ts"), /config-only/);
 });

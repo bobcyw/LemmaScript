@@ -38,6 +38,13 @@ export const OPTION_SPECS = {
     fileOverride: false,
     description: "Which model of JavaScript strings a Dafny proof is made under.",
   },
+  "dafny-library": {
+    type: "enum",
+    values: ["stdlib", "local"],
+    default: "stdlib",
+    fileOverride: false,
+    description: "Use Dafny's standard library or generated local helpers for collection operations.",
+  },
 } as const;
 
 type OptionSpecs = typeof OPTION_SPECS;
@@ -214,12 +221,14 @@ export function parseFileOptions(sourceText: string, source: string): ExplicitOp
   return out as ExplicitOptions;
 }
 
-/** Fill missing options with defaults and freeze the resolved configuration. */
+/** Apply defaults, check option compatibility, and freeze the resolved configuration. */
 export function resolveOptions(explicit: ExplicitOptions, source: string): LscOptions {
-  // Each option is independent: selecting a value for one option does not
-  // change another option's default or make its value invalid.
-  void source;
-  return Object.freeze({ ...DEFAULT_OPTIONS, ...explicit });
+  const options = { ...DEFAULT_OPTIONS, ...explicit };
+  // Dafny's precompiled standard library uses Unicode-scalar characters.
+  if (options["string-semantics"] === "javascript-utf16" && options["dafny-library"] === "stdlib") {
+    fail(source, '"string-semantics": "javascript-utf16" is incompatible with "dafny-library": "stdlib"; set "dafny-library": "local" explicitly');
+  }
+  return Object.freeze(options);
 }
 
 /** Find `fileName` at or above `fromPath`. */

@@ -1,6 +1,6 @@
 # DESIGN_STRINGS — JavaScript string semantics as a versioned profile
 
-**Status:** rung 0 and rung 1 implemented in PR #211; later rungs unscheduled. Takes up the `javascript-utf16` sketch in [DESIGN_CONFIG.md](DESIGN_CONFIG.md) §"Future options" and answers its open question 1 with the enum shape it asked about. Rung 1 is PR #211 rebased onto the option registry that shipped in 0.6.4 — #211's merge-base is 0.6.1 (`bcaf168`), before `tools/src/config.ts` existed.
+**Status:** rung 0 and rung 1 implemented in PR #211; later rungs unscheduled. The project selects its string model and collection library through the option registry described in [DESIGN_CONFIG.md](DESIGN_CONFIG.md).
 **Date:** September 2026
 **Issue:** [#210](https://github.com/midspiral/LemmaScript/issues/210) · **PR:** [#211](https://github.com/midspiral/LemmaScript/pull/211)
 
@@ -25,7 +25,8 @@ shape [DESIGN_NUMBERS.md](DESIGN_NUMBERS.md) chose for `number-semantics`:
 
 `unicode-scalar` stays the default so no `lemmascript.json` means today's behaviour
 ([DESIGN_CONFIG.md](DESIGN_CONFIG.md) requirement 3). A project opts into `javascript-utf16`
-with one key. A `javascript-utf16` proof carries `// lsc options: string-semantics=javascript-utf16`
+by setting `"string-semantics": "javascript-utf16"` and `"dafny-library": "local"` explicitly.
+A `javascript-utf16` proof carries `// lsc options: string-semantics=javascript-utf16`
 in its header ([DESIGN_CONFIG.md](DESIGN_CONFIG.md) §5 form); the default's header is
 unchanged, so no existing artifact changes. Each identity's claim sentence lives in
 SPEC_DAFNY.md §4. `dafnyVerify` pins `--unicode-char:true` whenever the token is absent —
@@ -141,7 +142,7 @@ for the domain and states the operations that differ instead.
 
 ## 4. Configuration
 
-One registry entry in [`tools/src/config.ts`](tools/src/config.ts), following the shape
+Two registry entries in [`tools/src/config.ts`](tools/src/config.ts), following the shape
 `OPTION_SPECS` already has:
 
 ```ts
@@ -150,7 +151,14 @@ One registry entry in [`tools/src/config.ts`](tools/src/config.ts), following th
   values: ["unicode-scalar", "javascript-utf16"],
   default: "unicode-scalar",
   fileOverride: false,
-  description: "Which model of JavaScript strings a proof is made under (DESIGN_STRINGS.md).",
+  description: "Which model of JavaScript strings a Dafny proof is made under.",
+},
+"dafny-library": {
+  type: "enum",
+  values: ["stdlib", "local"],
+  default: "stdlib",
+  fileOverride: false,
+  description: "Use Dafny's standard library or generated local helpers for collection operations.",
 },
 ```
 
@@ -161,13 +169,17 @@ under its own model. Profiles must agree across a checked dependency closure, in
 across nested `lemmascript.json` files; a mismatch is an error naming both files, and
 auto-extern must not invent a bridge.
 
-`resolveOptions` gains no rule: with one key there is no cross-option constraint (the
-`config.ts` comment reserving "UTF-16 → local Dafny library" is retired). The emitter derives
-the helper source from the profile — `Std.Collections.Seq` under `unicode-scalar`, the local
-`SeqFilter`/`SeqAll`/`SeqFoldLeft` under `javascript-utf16` — because the user never chooses
-the library. `dafnyVerify`'s text detection of `Std.` is unchanged; a `javascript-utf16`
+`dafny-library` independently selects `Std.Collections.Seq` helpers (`stdlib`, the default)
+or generated `SeqFilter`/`SeqAll`/`SeqFoldLeft` helpers (`local`). Unicode-scalar strings
+support either choice. `resolveOptions` rejects UTF-16 with an omitted or explicit `stdlib`
+choice and asks for `"dafny-library": "local"`; it never changes the library silently.
+Both options are project settings, with no file override.
+`dafnyVerify`'s text detection of `Std.` is unchanged; a `javascript-utf16`
 artifact whose proof additions import `Std.*` is refused by #211's fail-closed check with a
-message naming `string-semantics`. `lsc config` reports the resolved value.
+message naming `string-semantics`. `lsc config` reports both resolved values.
+The library choice is embodied in the generated helper definitions/calls, so it needs no
+extra verifier flag or artifact token. Handwritten imports remain subject to the artifact's
+character mode, independently of which collection helpers were generated.
 
 Selecting `javascript-utf16` with `--backend=lean` is an error. Lean's `String` is a sequence
 of `Char` (Unicode scalars) and [`LemmaScript/JSString.lean`](LemmaScript/JSString.lean)
@@ -255,8 +267,8 @@ One PR per rung, stacked, each landing only with its evidence.
 **Rung 0 — name the profile, make it configuration, pin the default.** No semantic change,
 no artifact change.
 
-- `string-semantics` registry entry; `lsc config` row. No `dafny-lib` key (open decision 3):
-  the emitter derives helper source from the profile.
+- `string-semantics` and `dafny-library` registry entries; `lsc config` reports both.
+  The emitter selects collection helpers from the library choice, not the string profile.
 - `dafnyVerify` parses the `lsc options:` line; pins `--unicode-char:true` whenever no
   `string-semantics=` token is present (a header-less `.dfy` gets the pin and no warning —
   DESIGN_CONFIG.md open question 3); rejects a token naming an unknown or unimplemented value.
@@ -293,7 +305,8 @@ in every `dafnyVerify` invocation that lacks the token; a `.dfy` carrying
 - Preambles that mention chars vary with the mode (`IsJSWhitespace` must use `\u` escapes
   under `unicode-char:false` and `\U{}` otherwise; Dafny rejects the other form).
   `PREAMBLE_CODE` entries become `string | (options) => string`.
-- `SeqFilter` / `SeqAll` / `SeqFoldLeft` local helpers emitted whenever the profile is `javascript-utf16`.
+- `SeqFilter` / `SeqAll` / `SeqFoldLeft` helpers emitted under `dafny-library: "local"`,
+  which UTF-16 requires explicitly and Unicode-scalar projects may also select.
 - `--unicode-char:false --allow-deprecation`; never `--allow-warnings`.
 - Lean: hard error.
 
@@ -335,20 +348,18 @@ Differential tests support the model; they do not replace the Dafny proofs.
 ## 9. Open decisions
 
 1. *Resolved.* The `lsc options:` line appears only when the file uses `string` and the
-   profile is non-default — DESIGN_CONFIG.md §"Future options" decided this ("the header
-   marker would only be emitted when strings actually appear"), #211's emission-tied flag is
-   the mechanism, and the always-on cost is measured in §7. There is no separate
+   profile is non-default. The emitter tracks string usage while generating declarations;
+   the always-on cost is measured in §7. There is no separate
    `String model:` line.
 2. Should `unicode-scalar` refuse `.length`, indexing, and `charCodeAt` on literals that
    contain astral text (where the answer is knowably wrong), rather than stating the
    difference in the profile's claim sentence (SPEC_DAFNY.md §4)? Refusal is safer; the
    documented claim is what today's proofs already rely on. Rung 0 keeps the claim; rung 1
    may add the refusal as a warning.
-3. *Resolved.* `dafny-lib` is not a user-facing key: the profile determines helper source
-   (§4), `Std.` detection stays text-based, and nobody asked for `local-lib` under
-   `unicode-scalar`. Byte-for-byte default output is preserved. If the local helpers ever
-   become the only library under both profiles, that is an emitter change plus a regen, with
-   no registry entry to remove.
+3. *Resolved.* `dafny-library: "stdlib" | "local"` is an independent project setting,
+   defaulting to `stdlib`. UTF-16 requires an explicit `local` choice; Unicode-scalar
+   projects can use either. Default output is preserved, and `Std.` detection stays
+   artifact-based (§4).
 4. Should the identity suffix be part of the public value (`javascript-utf16-1` in
    `lemmascript.json`) or internal, as DESIGN_NUMBERS proposes? This design keeps it internal.
 

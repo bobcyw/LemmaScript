@@ -63,9 +63,12 @@ cross-option checks. `lsc.ts` merges explicit project values with eligible
 top-of-file overrides and resolves once per source file. It passes the result
 to extraction/emission; those phases never read config files.
 `string-semantics` is consumed by the Dafny emitter (literal escaping, char-sensitive
-preambles, helper source, and the `// lsc options:` header token) and by extraction
+preambles, and the `// lsc options:` header token) and by extraction
 (surrogate literals under the default); `dafnyVerify` derives the char-mode flags from
-that token, never from the config. `proof-dir` is
+that token, never from the config. `dafny-library` selects standard-library or local
+collection helpers. `resolveOptions` rejects UTF-16 with the default or explicit `stdlib`
+choice; callers must select `local`. `emitDafnyFile` also applies this shared check to
+programmatically supplied options. `proof-dir` is
 consumed only by `lsc.ts`, which maps the complete Dafny companion set before
 calling the unchanged Dafny command helpers. `TransformOptions` remains
 backend-intrinsic pipeline configuration and is deliberately separate.

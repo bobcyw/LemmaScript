@@ -7,7 +7,7 @@ import { exactIntegerLiteral, usesName, usesNameInDecl, usesNameInStmts } from "
 import type { Ty } from "./typedir.js";
 import { freshName, freshNameWhere, userNames } from "./names.js";
 import { renameFreeVar } from "./transform.js";
-import { DEFAULT_OPTIONS, type LscOptions } from "./config.js";
+import { DEFAULT_OPTIONS, resolveOptions, type LscOptions } from "./config.js";
 
 /** Fresh binder for a comprehension wrapping the given subexpressions: `base`
  *  verbatim unless one of them references it, then primed until free. A *local*
@@ -377,14 +377,14 @@ function emitExpr(e: Expr): string {
           return bind ? `(var ${s} := ${obj}; ${comp})` : comp;
         }
         if (e.method === "filter") {
-          if (!isUtf16()) return `Std.Collections.Seq.Filter(${args[0]}, ${obj})`;
+          if (_dafnyLibrary === "stdlib") return `Std.Collections.Seq.Filter(${args[0]}, ${obj})`;
           needPreamble("SeqFilter");
           return `SeqFilter(${args[0]}, ${obj})`;
         }
         // filterMap (synthesized in resolve): drop Nones and unwrap to seq<T>.
         if (e.method === "filterSome") { needPreamble("SeqFilterSome"); needPreamble("OptionType"); return `SeqFilterSome(${obj})`; }
         if (e.method === "every") {
-          if (!isUtf16()) return `Std.Collections.Seq.All(${obj}, ${args[0]})`;
+          if (_dafnyLibrary === "stdlib") return `Std.Collections.Seq.All(${obj}, ${args[0]})`;
           needPreamble("SeqAll");
           return `SeqAll(${obj}, ${args[0]})`;
         }
@@ -429,11 +429,9 @@ function emitExpr(e: Expr): string {
           }
           return `(exists ${p} :: ${p} in ${obj} && ${body})`;
         }
-        // `.reduce(f, init)` → FoldLeft(f, init, xs) (same arg order): Std's under
-        // unicode-scalar, the local helper under javascript-utf16, whose char mode
-        // cannot load the precompiled standard library.
+        // `.reduce(f, init)` → FoldLeft(f, init, xs), using the selected library.
         if (e.method === "reduce" && args.length === 2) {
-          if (!isUtf16()) return `Std.Collections.Seq.FoldLeft(${args[0]}, ${args[1]}, ${obj})`;
+          if (_dafnyLibrary === "stdlib") return `Std.Collections.Seq.FoldLeft(${args[0]}, ${args[1]}, ${obj})`;
           needPreamble("SeqFoldLeft");
           return `SeqFoldLeft(${args[0]}, ${args[1]}, ${obj})`;
         }
@@ -995,6 +993,9 @@ function needPreamble(key: string) { _neededPreambles.add(key); }
 /** Effective JS-clamp semantics for `arr.slice(lo, hi)`, resolved from project
  *  config plus file directives before emission. */
 let _useSafeSlice = false;
+
+// Source of generated collection helpers, selected independently of string semantics.
+let _dafnyLibrary: LscOptions["dafny-library"] = DEFAULT_OPTIONS["dafny-library"];
 
 // The string profile this file is emitted under (DESIGN_STRINGS.md) and whether
 // any generated declaration used `string`. Together they decide the
@@ -1621,8 +1622,11 @@ function translatePattern(p: MatchPattern): string {
 
 
 export function emitDafnyFile(file: Module, tsFileName?: string, options: LscOptions = DEFAULT_OPTIONS): string {
+  // Programmatic callers share the CLI's compatibility checks.
+  options = resolveOptions(options, tsFileName ?? "Dafny emission");
   _useSafeSlice = options["safe-slice"];
   _stringSemantics = options["string-semantics"];
+  _dafnyLibrary = options["dafny-library"];
   // Reset before scanning types, including when the previous file failed to emit.
   _usesStrings = false;
   resetDafnyNameCache();

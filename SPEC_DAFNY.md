@@ -117,12 +117,19 @@ The Dafny emitter auto-injects helper functions when needed. Each is emitted at 
 | `StringTrim` | `s.trim()` / `s.trimEnd()` / `s.trimStart()` | Trim (also provides `StringTrimRight` / `StringTrimLeft`); strips the full ECMAScript whitespace set via `IsJSWhitespace`, not just `' '` |
 | `StringToLower` / `StringToUpper` | `s.toLowerCase()` / `s.toUpperCase()` | Case folding |
 
-**String profile.** `string-semantics` in `lemmascript.json` (SPEC.md §7.6) selects which model of JavaScript strings a proof is made under; each is a named identity the proof's claims are relative to (DESIGN_STRINGS.md):
+**String profile.** `string-semantics` in `lemmascript.json` (SPEC.md §7.6) selects which model of JavaScript strings a proof is made under; each is a named identity the proof's claims are relative to:
 
 | Identity | `lemmascript.json` | Claim |
 |---|---|---|
 | `unicode-scalar-1` | `"unicode-scalar"` (default) | Dafny `string` under `--unicode-char:true`: strings are Unicode scalar sequences. `.length`, indexing, `slice`, `charCodeAt`, and `indexOf` are over scalars and differ from JavaScript for astral text; unpaired surrogates are outside the domain (refused in literals; `String.fromCharCode` requires a scalar); case mapping is ASCII-only. No header token. |
-| `javascript-utf16-1` | `"javascript-utf16"` | Dafny `string` under `--unicode-char:false`: strings are UTF-16 code-unit sequences. `.length`, indexing, `slice`, `charCodeAt`, and `String.fromCharCode` (`0 <= n < 0x10000`) are exact; `filter`/`every`/`reduce` use local `SeqFilter`/`SeqAll`/`SeqFoldLeft` helpers because the Dafny standard library cannot load in this mode; case mapping is ASCII-only. Generated files carry `// lsc options: string-semantics=javascript-utf16`. |
+| `javascript-utf16-1` | `"javascript-utf16"` | Dafny `string` under `--unicode-char:false`: strings are UTF-16 code-unit sequences. `.length`, indexing, `slice`, `charCodeAt`, and `String.fromCharCode` (`0 <= n < 0x10000`) are exact; requires `"dafny-library": "local"` because the Dafny standard library cannot load in this mode; case mapping is ASCII-only. Generated string-bearing files carry `// lsc options: string-semantics=javascript-utf16`. |
+
+**Collection helpers.** `dafny-library` independently selects `stdlib` (default) or `local`
+for `filter`, `every`, and `reduce`: `Std.Collections.Seq.Filter/All/FoldLeft` or generated
+`SeqFilter`/`SeqAll`/`SeqFoldLeft`. Unicode-scalar strings support both choices. UTF-16 with
+an omitted or explicit `stdlib` choice is a configuration error; select `local` explicitly.
+This option controls generated helpers, not handwritten proof imports; those remain subject
+to the character-mode compatibility check below. Selecting `local` does not change string semantics.
 
 ---
 
@@ -148,4 +155,3 @@ a `javascript-utf16` proof whose additions import `Std.*` fails closed with an
 error naming `string-semantics`; a `unicode-scalar` proof may use it freely.
 
 The shared `--time-limit=<seconds>` flag (SPEC.md §7) maps to Dafny's `--verification-time-limit`; `--extra-flags=<string>` is forwarded verbatim to `dafny verify`.
-

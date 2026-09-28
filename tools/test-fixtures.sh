@@ -175,7 +175,7 @@ expect_failure \
   npx tsx tools/src/lsc.ts gen --backend=dafny "$config_fixture/src/legacy.ts"
 expect_absent "$config_fixture/proofs/src/legacy.dfy"
 
-# ── String profile (DESIGN_STRINGS.md) ──────────────────────────────────────
+# ── String profile and collection library ─────────────────────────────────
 # Under "string-semantics": "javascript-utf16" a JavaScript string is a UTF-16
 # code-unit sequence: astral characters occupy two Dafny chars and lone
 # surrogates stay representable. The header token is what dafnyVerify maps to
@@ -186,6 +186,10 @@ if ! npx tsx tools/src/lsc.ts config "$utf16" | grep -Fq '"string-semantics": "j
   echo "ERROR: lsc config did not report string-semantics=javascript-utf16"
   exit 1
 fi
+if ! npx tsx tools/src/lsc.ts config "$utf16" | grep -Fq '"dafny-library": "local"'; then
+  echo "ERROR: lsc config did not report the explicit local library choice"
+  exit 1
+fi
 npx tsx tools/src/lsc.ts check --backend=dafny --time-limit=10 "$utf16"
 grep -Fq '// lsc options: string-semantics=javascript-utf16' "$utf16_gen"
 grep -Fq '"\uD83D\uDE00"' "$utf16_gen"
@@ -194,6 +198,59 @@ if grep -Fq 'Std.Collections' "$utf16_gen"; then
   echo "ERROR: javascript-utf16 emitted a Dafny standard-library call"
   exit 1
 fi
+
+# The library has a fixed stdlib default; UTF-16 never silently changes it.
+cp -R tools/fixtures/config-incompatible-strings "$fixture_dir/incompatible-strings"
+incompatible="$fixture_dir/incompatible-strings/source.ts"
+expect_failure "UTF-16 silently changed the default library" \
+  npx tsx tools/src/lsc.ts gen --backend=dafny "$incompatible"
+expect_failure "UTF-16 accepted an explicit stdlib choice" \
+  npx tsx tools/src/lsc.ts gen --backend=dafny \
+    --config="$fixture_dir/incompatible-strings/stdlib.json" "$incompatible"
+expect_absent "$fixture_dir/incompatible-strings/source.dfy.gen"
+expect_absent "$fixture_dir/incompatible-strings/source.dfy"
+
+# Prove the same collection contracts with default stdlib, scalar/local, and
+# UTF-16/local. All generated artifacts stay in the temporary fixture directory.
+cp -R tools/fixtures/collection-library-project "$fixture_dir/local-collections"
+cp tools/fixtures/collection-library-project/collections.ts "$fixture_dir/standard-collections.ts"
+cp tools/fixtures/collection-library-project/collections.ts "$fixture_dir/utf16-project/collections.ts"
+npx tsx tools/src/lsc.ts gen --backend=dafny "$fixture_dir/standard-collections.ts"
+# Standard Filter is opaque. Add proof steps that expose its definition and
+# unfold the three input elements plus the empty tail; check enforces additions-only.
+node --input-type=module - "$fixture_dir/standard-collections.dfy" <<'JS'
+import { readFileSync, writeFileSync } from "node:fs";
+const path = process.argv[2];
+let proof = readFileSync(path, "utf8");
+for (const [name, type, expected] of [
+  ["positiveNumbers", "int", "[1, 2]"],
+  ["nonemptyStrings", "string", '["a", "bc"]'],
+]) {
+  const start = new RegExp(`lemma ${name}_ensures\\(\\)[\\s\\S]*?\\{\\n`);
+  if (!start.test(proof)) throw new Error(`Missing proof body for ${name}`);
+  proof = proof.replace(start, "$&  reveal Std.Collections.Seq.Filter();\n"
+    + `  assert {:fuel Std.Collections.Seq.Filter<${type}>, 4, 5} ${name}() == ${expected};\n`);
+}
+writeFileSync(path, proof);
+JS
+npx tsx tools/src/lsc.ts check --backend=dafny --time-limit=10 "$fixture_dir/standard-collections.ts"
+for helper in Filter All FoldLeft; do
+  grep -Fq "Std.Collections.Seq.$helper(" "$fixture_dir/standard-collections.dfy.gen"
+done
+for source in "$fixture_dir/local-collections/collections.ts" "$fixture_dir/utf16-project/collections.ts"; do
+  npx tsx tools/src/lsc.ts check --backend=dafny --time-limit=10 "$source"
+  generated="${source%.ts}.dfy.gen"
+  if grep -Fq 'Std.' "$generated"; then
+    echo "ERROR: dafny-library=local emitted a standard-library reference"
+    exit 1
+  fi
+  for helper in SeqFilter SeqAll SeqFoldLeft; do grep -Fq "$helper<" "$generated"; done
+done
+if grep -Fq '// lsc options:' "$fixture_dir/local-collections/collections.dfy.gen"; then
+  echo "ERROR: selecting local helpers changed scalar string semantics"
+  exit 1
+fi
+grep -Fq '// lsc options: string-semantics=javascript-utf16' "$fixture_dir/utf16-project/collections.dfy.gen"
 
 expect_failure \
   "Dafny standard library was combined with javascript-utf16 strings" \

@@ -850,7 +850,7 @@ function stringLiteral(value: string, node: Node): RawExpr {
       throw new Error(
         `${file.getFilePath()}:${line}: string literal contains an unpaired surrogate ` +
         `U+${lone.toString(16).toUpperCase()}, which "string-semantics": "unicode-scalar" cannot ` +
-        `represent; set "javascript-utf16" in lemmascript.json (DESIGN_STRINGS.md §3)`,
+        `represent; set "string-semantics": "javascript-utf16" and "dafny-library": "local" in lemmascript.json`,
       );
     }
   }

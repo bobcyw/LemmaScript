@@ -95,10 +95,15 @@ at the current directory. Use `--config=<path>` to pin a particular file.
 {
   "extern-default": "impure",
   "string-semantics": "unicode-scalar",
+  "dafny-library": "stdlib",
   "safe-slice": true,
   "proof-dir": "proofs"
 }
 ```
+
+`dafny-library` selects `stdlib` (default) or generated `local` helpers for collection
+operations. Enabling `"string-semantics": "javascript-utf16"` requires explicitly setting
+`"dafny-library": "local"`; an omitted or explicit `stdlib` choice is an error.
 
 ### `lsc claimcheck`
 

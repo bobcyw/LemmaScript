@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_OPTIONS, type LscOptions } from "../src/config.ts";
+import { DEFAULT_OPTIONS, resolveOptions } from "../src/config.ts";
 import { emitDafnyFile } from "../src/dafny-emit.ts";
-import type { Decl, Module } from "../src/ir.ts";
+import type { Decl, Expr, Module } from "../src/ir.ts";
 
-const utf16: LscOptions = { ...DEFAULT_OPTIONS, "string-semantics": "javascript-utf16" };
+const utf16 = resolveOptions({ "string-semantics": "javascript-utf16", "dafny-library": "local" }, "test");
 const optionsHeader = /^\/\/ lsc options: string-semantics=javascript-utf16$/m;
 
 function moduleWith(...decls: Decl[]): Module {
@@ -13,6 +13,35 @@ function moduleWith(...decls: Decl[]): Module {
 
 const numbers = moduleWith({ kind: "const", name: "answer", type: { kind: "int" }, value: { kind: "num", value: 42 } });
 const stringType: Decl = { kind: "type-alias", name: "Text", target: { kind: "string" } };
+
+test("programmatic emission rejects UTF-16 with the default standard library", () => {
+  assert.throws(() => emitDafnyFile(numbers, "numbers.ts", { ...DEFAULT_OPTIONS, "string-semantics": "javascript-utf16" }),
+    /numbers\.ts:.*javascript-utf16.*dafny-library.*stdlib.*local/);
+});
+
+for (const [method, helper, resultType] of [
+  ["filter", "Filter", { kind: "array", elem: { kind: "int" } }],
+  ["every", "All", { kind: "bool" }],
+  ["reduce", "FoldLeft", { kind: "int" }],
+] as const) {
+  test(`${method} follows the library option independently of string semantics`, () => {
+    const callback: Expr = { kind: "var", name: "callback" };
+    const file = moduleWith({ kind: "const", name: "value", type: resultType, value: {
+      kind: "methodCall", obj: { kind: "var", name: "values" }, objTy: { kind: "array", elem: { kind: "int" } },
+      method, args: method === "reduce" ? [callback, { kind: "num", value: 0 }] : [callback], monadic: false,
+    } });
+    const standard = emitDafnyFile(file, "collections.ts");
+    assert.ok(standard.includes(`Std.Collections.Seq.${helper}(`));
+    for (const options of [resolveOptions({ "dafny-library": "local" }, "test"), utf16]) {
+      const local = emitDafnyFile(file, "collections.ts", options);
+      assert.doesNotMatch(local, /Std\./);
+      assert.match(local, new RegExp(`(?:function|predicate) Seq${helper}<`));
+    }
+    // A local emission must not change the next file's default library.
+    assert.equal(emitDafnyFile(file, "collections.ts"), standard);
+    assert.equal(emitDafnyFile(file, "collections.ts", resolveOptions({ "dafny-library": "stdlib" }, "test")), standard);
+  });
+}
 
 for (const [name, declaration] of [
   ["string type without literals", stringType],

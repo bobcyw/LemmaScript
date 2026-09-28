@@ -1,4 +1,4 @@
 {
   "string-semantics": "javascript-utf16",
-  "dafny-library": "local"
+  "dafny-library": "stdlib"
 }
