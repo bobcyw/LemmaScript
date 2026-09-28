@@ -102,9 +102,25 @@ test("javascript-utf16 selects code-unit chars and only the deprecation waiver",
   assert.deepEqual(args, ["verify", "--unicode-char:false", "--allow-deprecation"]);
 });
 
-test("javascript-utf16 refuses the Unicode-scalar standard library", () => {
-  const { error } = dafnyVerifyArgs("// lsc options: string-semantics=javascript-utf16\nimport opened Std.Arithmetic.Mul\n");
-  assert.match(error ?? "", /string-semantics/);
+for (const reference of [
+  "import opened Std.Arithmetic.Mul",
+  "function all(xs: seq<int>): bool { Std.Collections.Seq.All(xs, x => x > 0) }",
+]) {
+  test(`UTF-16 library diagnostic explains local helpers and proof additions: ${reference}`, () => {
+    const { args, error } = dafnyVerifyArgs(`// lsc options: string-semantics=javascript-utf16\n${reference}\n`);
+    assert.deepEqual(args, []);
+    assert.match(error ?? "", /string-semantics/);
+    assert.match(error ?? "", /Set "dafny-library": "local" in lemmascript\.json/);
+    assert.match(error ?? "", /\/\/@ option dafny-library local/);
+    assert.match(error ?? "", /lsc regen/);
+    assert.match(error ?? "", /does not rewrite handwritten Std\.\* imports or calls/);
+  });
+}
+
+test("Unicode-scalar proofs can still use the standard library", () => {
+  const { args, error } = dafnyVerifyArgs("import opened Std.Arithmetic.Mul\n");
+  assert.equal(error, undefined);
+  assert.deepEqual(args, ["verify", "--standard-libraries", "--unicode-char:true"]);
 });
 
 for (const token of ["string-semantics=utf8", "string-semantics=", "string-semantics"]) {
