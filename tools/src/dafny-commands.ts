@@ -99,7 +99,7 @@ export function dafnyVerifyArgs(content: string, timeLimit?: number, extraFlags?
     return { args: [], error:
       "ERROR: this proof combines \"string-semantics\": \"javascript-utf16\" with Dafny's standard library. " +
       "Dafny 4.11 cannot load its Unicode-scalar standard library under --unicode-char:false. " +
-      "Remove the Std.* import from the proof additions, or set \"unicode-scalar\" in lemmascript.json." };
+      "Remove the Std.* import from the proof additions, or select unicode-scalar in lemmascript.json or a //@ option directive and regenerate." };
   }
   const args: string[] = ["verify"];
   if (usesStandardLibrary) args.push("--standard-libraries");

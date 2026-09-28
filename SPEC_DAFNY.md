@@ -117,9 +117,9 @@ The Dafny emitter auto-injects helper functions when needed. Each is emitted at 
 | `StringTrim` | `s.trim()` / `s.trimEnd()` / `s.trimStart()` | Trim (also provides `StringTrimRight` / `StringTrimLeft`); strips the full ECMAScript whitespace set via `IsJSWhitespace`, not just `' '` |
 | `StringToLower` / `StringToUpper` | `s.toLowerCase()` / `s.toUpperCase()` | Case folding |
 
-**String profile.** `string-semantics` in `lemmascript.json` (SPEC.md §7.6) selects which model of JavaScript strings a proof is made under; each is a named identity the proof's claims are relative to:
+**String profile.** `string-semantics` in `lemmascript.json` or a file's `//@ option` directive (SPEC.md §7.6) selects which model of JavaScript strings a proof is made under; each is a named identity the proof's claims are relative to:
 
-| Identity | `lemmascript.json` | Claim |
+| Identity | Option value | Claim |
 |---|---|---|
 | `unicode-scalar-1` | `"unicode-scalar"` (default) | Dafny `string` under `--unicode-char:true`: strings are Unicode scalar sequences. `.length`, indexing, `slice`, `charCodeAt`, and `indexOf` are over scalars and differ from JavaScript for astral text; unpaired surrogates are outside the domain (refused in literals; `String.fromCharCode` requires a scalar); case mapping is ASCII-only. No header token. |
 | `javascript-utf16-1` | `"javascript-utf16"` | Dafny `string` under `--unicode-char:false`: strings are UTF-16 code-unit sequences. `.length`, indexing, `slice`, `charCodeAt`, and `String.fromCharCode` (`0 <= n < 0x10000`) are exact; requires `"dafny-library": "local"` because the Dafny standard library cannot load in this mode; case mapping is ASCII-only. Generated string-bearing files carry `// lsc options: string-semantics=javascript-utf16`. |
@@ -128,6 +128,7 @@ The Dafny emitter auto-injects helper functions when needed. Each is emitted at 
 for `filter`, `every`, and `reduce`: `Std.Collections.Seq.Filter/All/FoldLeft` or generated
 `SeqFilter`/`SeqAll`/`SeqFoldLeft`. Unicode-scalar strings support both choices. UTF-16 with
 an omitted or explicit `stdlib` choice is a configuration error; select `local` explicitly.
+Both settings accept file directives; [examples/utf16.ts](examples/utf16.ts) demonstrates them.
 This option controls generated helpers, not handwritten proof imports; those remain subject
 to the character-mode compatibility check below. Selecting `local` does not change string semantics.
 

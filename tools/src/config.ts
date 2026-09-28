@@ -35,14 +35,14 @@ export const OPTION_SPECS = {
     type: "enum",
     values: ["unicode-scalar", "javascript-utf16"],
     default: "unicode-scalar",
-    fileOverride: false,
+    fileOverride: true,
     description: "Which model of JavaScript strings a Dafny proof is made under.",
   },
   "dafny-library": {
     type: "enum",
     values: ["stdlib", "local"],
     default: "stdlib",
-    fileOverride: false,
+    fileOverride: true,
     description: "Use Dafny's standard library or generated local helpers for collection operations.",
   },
 } as const;

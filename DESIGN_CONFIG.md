@@ -50,8 +50,8 @@ export const OPTION_SPECS = {
   "extern-default": { type: "enum", values: ["pure", "impure"], default: "pure", fileOverride: true, description: "…" },
   "safe-slice":     { type: "boolean", default: false, fileOverride: true, directiveAliases: ["safe-slice"], description: "…" },
   "proof-dir":      { type: "path", default: null, fileOverride: false, description: "…" },
-  "string-semantics": { type: "enum", values: ["unicode-scalar", "javascript-utf16"], default: "unicode-scalar", fileOverride: false, description: "…" },
-  "dafny-library":  { type: "enum", values: ["stdlib", "local"], default: "stdlib", fileOverride: false, description: "…" },
+  "string-semantics": { type: "enum", values: ["unicode-scalar", "javascript-utf16"], default: "unicode-scalar", fileOverride: true, description: "…" },
+  "dafny-library":  { type: "enum", values: ["stdlib", "local"], default: "stdlib", fileOverride: true, description: "…" },
 } as const;
 
 export type LscOptions = { readonly [K in keyof typeof OPTION_SPECS]: /* boolean | enum union | string | null */ };
@@ -108,7 +108,17 @@ Enabling the option must not silently strand proof additions. If the mapped `.df
 
 `string-semantics: "unicode-scalar" | "javascript-utf16"` chooses the string model,
 defaulting to `unicode-scalar`. `dafny-library: "stdlib" | "local"` independently chooses
-the generated collection helpers, defaulting to `stdlib`. Both are config-only.
+the generated collection helpers, defaulting to `stdlib`. Both accept top-of-file
+`//@ option` directives, which override project settings before compatibility is checked.
+The ordinary [UTF-16 example](examples/utf16.ts) needs no JSON config.
+
+The CLI follows TypeScript-resolved source dependencies and checks their effective string
+models against the root file before emission. It also checks compiler-selected cross-file
+callees before extraction copies their contracts, including global declarations without
+an import edge. Cycles are visited once; unrelated tsconfig files are not dependencies.
+Declaration files carry no model, but their re-exports are followed. `--config` pins the
+project settings for dependencies too; file directives still apply separately. Different
+collection-library choices are allowed because they do not reinterpret contracts.
 
 `stdlib` emits `Std.Collections.Seq.Filter/All/FoldLeft` for `filter`/`every`/`reduce`;
 `local` emits `SeqFilter`/`SeqAll`/`SeqFoldLeft` definitions on demand. Unicode-scalar
@@ -164,7 +174,7 @@ Without a string-model token, verification explicitly uses `--unicode-char:true`
 ## 7. Docs and tests
 
 - **SPEC.md §2 and §7**: add `option` to the file-level directive table; add `config` to the command list, `--config=` to flags, and new §7.6 "Project configuration: `lemmascript.json`" with the table from §3 (~15 lines, per AGENTS.md style). §2.7 describes `safe-slice` as both an option and a legacy directive; §2.9/§2.11 extern prose becomes conditional on `extern-default`. **SPEC_DAFNY.md**: document `proof-dir`, its mirrored layout, and proof migration. **SPEC_LEAN.md**: one line on impure externs. **TOOLS.md**: `config.ts` in the file table plus a short "Options" section on the flow in §4. **AGENTS.md**: one line under Toolchain commands pointing at `lsc config`; its regen rules apply to mapped paths unchanged. **site `reference/cli.md`**: directive, flag, and command rows plus a "Project configuration" section (hand-written page; `DESIGN_CONFIG.md` itself joins `sync-docs.mjs` like the other design docs).
-- **`tools/test-fixtures.sh`** keeps a small fixture directory with `lemmascript.json` and a nested source file to exercise nearest-ancestor discovery, plus invalid config fixtures for an unknown key and a bad value. It verifies that `proof-dir` mirrors the nested path, creates `.dfy.gen` and `.dfy` there rather than beside the TS, and refuses to bypass a pre-existing sibling proof. Self-contained source fixtures use `//@ option` to exercise `extern-default`, `safe-slice: false`, a config-only `proof-dir` directive error, bad and duplicate directives, and precedence over the project config. A `lsc config` invocation is grepped for the effective post-directive values and resolved artifact directory. Existing fixtures run without a config and pin the defaults. UTF-16 and JavaScript-number fixtures are deferred with those options.
+- **`tools/test-fixtures.sh`** keeps a small fixture directory with `lemmascript.json` and a nested source file to exercise nearest-ancestor discovery, plus invalid config fixtures for an unknown key and a bad value. It verifies that `proof-dir` mirrors the nested path, creates `.dfy.gen` and `.dfy` there rather than beside the TS, and refuses to bypass a pre-existing sibling proof. Self-contained source fixtures use `//@ option` to exercise `extern-default`, `safe-slice: false`, a config-only `proof-dir` directive error, bad and duplicate directives, and precedence over the project config. A `lsc config` invocation is grepped for the effective post-directive values and resolved artifact directory. Existing fixtures run without a config and pin the defaults. UTF-16 is exercised through both project config and the ordinary file-directive example; unit tests cover dependency compatibility. JavaScript-number fixtures remain deferred.
 - **CI** is otherwise untouched: examples and case studies verify under today's pure-extern default; #211 and #205 are outside the initial scope.
 
 ## 8. Initial scope and future PRs

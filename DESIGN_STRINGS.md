@@ -25,7 +25,8 @@ shape [DESIGN_NUMBERS.md](DESIGN_NUMBERS.md) chose for `number-semantics`:
 
 `unicode-scalar` stays the default so no `lemmascript.json` means today's behaviour
 ([DESIGN_CONFIG.md](DESIGN_CONFIG.md) requirement 3). A project opts into `javascript-utf16`
-by setting `"string-semantics": "javascript-utf16"` and `"dafny-library": "local"` explicitly.
+by setting `"string-semantics": "javascript-utf16"` and `"dafny-library": "local"` explicitly,
+either in project config or through file-level `//@ option` directives.
 A `javascript-utf16` proof carries `// lsc options: string-semantics=javascript-utf16`
 in its header ([DESIGN_CONFIG.md](DESIGN_CONFIG.md) §5 form); the default's header is
 unchanged, so no existing artifact changes. Each identity's claim sentence lives in
@@ -150,30 +151,30 @@ Two registry entries in [`tools/src/config.ts`](tools/src/config.ts), following 
   type: "enum",
   values: ["unicode-scalar", "javascript-utf16"],
   default: "unicode-scalar",
-  fileOverride: false,
+  fileOverride: true,
   description: "Which model of JavaScript strings a Dafny proof is made under.",
 },
 "dafny-library": {
   type: "enum",
   values: ["stdlib", "local"],
   default: "stdlib",
-  fileOverride: false,
+  fileOverride: true,
   description: "Use Dafny's standard library or generated local helpers for collection operations.",
 },
 ```
 
-`fileOverride: false` for the same reason `number-semantics` is config-only
-([DESIGN_NUMBERS.md](DESIGN_NUMBERS.md) §6): the model changes every string signature, so
-a per-file `//@ option` would let a caller reinterpret an auto-externed callee's `string`
-under its own model. Profiles must agree across a checked dependency closure, including
-across nested `lemmascript.json` files; a mismatch is an error naming both files, and
-auto-extern must not invent a bridge.
+Both settings accept `//@ option` before the first source statement. File values override
+project values, and compatibility is checked after merging. The CLI checks the effective
+string model across source dependencies, including re-exports, nested config files, and
+compiler-selected cross-file callees. A mismatch names both files and stops translation
+before contracts can be interpreted under the wrong model. Declaration files carry no
+model; their re-exports are followed. Unrelated tsconfig files can use other profiles.
 
 `dafny-library` independently selects `Std.Collections.Seq` helpers (`stdlib`, the default)
 or generated `SeqFilter`/`SeqAll`/`SeqFoldLeft` helpers (`local`). Unicode-scalar strings
 support either choice. `resolveOptions` rejects UTF-16 with an omitted or explicit `stdlib`
 choice and asks for `"dafny-library": "local"`; it never changes the library silently.
-Both options are project settings, with no file override.
+Library choices may differ between dependencies; their string profiles must agree.
 `dafnyVerify`'s text detection of `Std.` is unchanged; a `javascript-utf16`
 artifact whose proof additions import `Std.*` is refused by #211's fail-closed check with a
 message naming `string-semantics`. `lsc config` reports both resolved values.
@@ -356,7 +357,7 @@ Differential tests support the model; they do not replace the Dafny proofs.
    difference in the profile's claim sentence (SPEC_DAFNY.md §4)? Refusal is safer; the
    documented claim is what today's proofs already rely on. Rung 0 keeps the claim; rung 1
    may add the refusal as a warning.
-3. *Resolved.* `dafny-library: "stdlib" | "local"` is an independent project setting,
+3. *Resolved.* `dafny-library: "stdlib" | "local"` is an independent setting with project defaults and file overrides,
    defaulting to `stdlib`. UTF-16 requires an explicit `local` choice; Unicode-scalar
    projects can use either. Default output is preserved, and `Std.` detection stays
    artifact-based (§4).

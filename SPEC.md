@@ -1385,20 +1385,33 @@ it; absent means current behavior. Unknown keys and bad values are errors.
 | `extern-default` | `pure` \| `impure` | `pure` | yes |
 | `safe-slice` | boolean | `false` | yes |
 | `proof-dir` | relative path | source directory | no (Dafny only) |
-| `string-semantics` | `unicode-scalar` \| `javascript-utf16` | `unicode-scalar` | no (Dafny only) |
-| `dafny-library` | `stdlib` \| `local` | `stdlib` | no (Dafny only) |
+| `string-semantics` | `unicode-scalar` \| `javascript-utf16` | `unicode-scalar` | yes (Dafny only) |
+| `dafny-library` | `stdlib` \| `local` | `stdlib` | yes (Dafny only) |
 
 Eligible settings use `//@ option <key> <value>` before the first source
 statement. File values override project values; duplicates are errors.
 `proof-dir` mirrors the source's config-relative path under its configured root
 (see SPEC_DAFNY.md §1). `string-semantics` selects which model of JavaScript strings a
-Dafny proof is made under (SPEC_DAFNY.md §4); it is config-only because the model changes
-every string signature across the dependency closure. `dafny-library` selects standard-library
+Dafny proof is made under (SPEC_DAFNY.md §4). Source dependencies must use the same
+effective string model; mismatches name both files and are rejected before emission.
+`dafny-library` selects standard-library
 or generated local helpers for `filter`, `every`, and `reduce`. UTF-16 requires an explicit
 `"dafny-library": "local"`; omitting it keeps the `stdlib` default and reports an incompatibility.
 Unicode-scalar strings support either library choice. `lsc config foo.ts` prints the config path, effective
 options, and resolved Dafny artifact directory; `lsc config` reports defaults
 from the current directory. `backend` is deliberately not a config option.
+
+For a standalone file, put both settings before its first statement:
+
+```typescript
+//@ backend dafny
+//@ option string-semantics javascript-utf16
+//@ option dafny-library local
+```
+
+See [examples/utf16.ts](examples/utf16.ts) and its Dafny proof. Compatibility is checked
+after project values and file directives are merged. Collection libraries may differ
+between files; unlike the string model, they do not change the meaning of contracts.
 
 ---
 

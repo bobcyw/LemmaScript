@@ -183,11 +183,13 @@ test("string-semantics is an enum whose default is today's Unicode-scalar model"
   );
 });
 
-test("string-semantics is config-only: a file cannot reinterpret a callee's strings", () => {
-  assert.throws(
-    () => parseFileOptions("//@ option string-semantics javascript-utf16\n", "example.ts"),
-    /config-only/,
-  );
+test("string and library directives override project defaults before compatibility checks", () => {
+  const file = parseFileOptions("//@ option string-semantics javascript-utf16\n//@ option dafny-library local\n", "example.ts");
+  const options = resolveOptions({ "string-semantics": "unicode-scalar", "dafny-library": "stdlib", ...file }, "example.ts");
+  assert.equal(options["string-semantics"], "javascript-utf16");
+  assert.equal(options["dafny-library"], "local");
+  assert.throws(() => resolveOptions(parseFileOptions("//@ option string-semantics javascript-utf16\n", "example.ts"), "example.ts"),
+    /incompatible/);
 });
 
 test("Dafny library defaults to stdlib and local works with scalar strings", () => {
@@ -213,9 +215,18 @@ test("UTF-16 requires an explicit local library choice", () => {
   assert.equal(resolveOptions(explicit, "lemmascript.json")["dafny-library"], "local");
 });
 
-test("Dafny library accepts only registered values and is config-only", () => {
+test("Dafny library accepts only registered values in config and file directives", () => {
   for (const value of [true, "standard", null]) {
     assert.throws(() => validateOptions({ "dafny-library": value }, "lemmascript.json"), /must be one of: stdlib, local/);
   }
-  assert.throws(() => parseFileOptions("//@ option dafny-library local\n", "example.ts"), /config-only/);
+  assert.deepEqual(parseFileOptions("//@ option dafny-library local\n", "example.ts"), { "dafny-library": "local" });
+  assert.throws(() => parseFileOptions("//@ option dafny-library standard\n", "example.ts"), /must be one of: stdlib, local/);
 });
+
+for (const [key, value] of [["string-semantics", "javascript-utf16"], ["dafny-library", "local"]]) {
+  test(`${key} retains duplicate and placement checks`, () => {
+    const directive = `//@ option ${key} ${value}\n`;
+    assert.throws(() => parseFileOptions(directive + directive, "example.ts"), /duplicate option/);
+    assert.throws(() => parseFileOptions("const value = 1;\n" + directive, "example.ts"), /before the first source statement/);
+  });
+}

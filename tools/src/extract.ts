@@ -57,6 +57,8 @@ let _currentSourceFile: SourceFile | null = null;
 let _inFunctionExtraction = false;
 /** Effective options for the current extraction. Reset at extractModule entry. */
 let _extractOptions: LscOptions = DEFAULT_OPTIONS;
+/** The CLI validates source options before copying a cross-file contract. */
+let _validateDependency: (source: SourceFile) => void = () => {};
 /** Counter for synthetic names used by let-statement array destructuring
  *  when the initializer isn't a bare variable (single-eval temp). */
 let _destrCounter = 0;
@@ -122,6 +124,8 @@ function detectCrossFileExtern(
   if (externalDecl.getSourceFile().getFilePath().endsWith(".d.ts")) return null;
   const sig = callee.getType().getCallSignatures()[0];
   if (!sig) return null;
+  // Includes global declarations selected by TypeScript without an import edge.
+  _validateDependency(externalDecl.getSourceFile());
   // Generic type parameters (e.g. `step<S, A>`). ts-morph reports param/return
   // types in the callee's own type-parameter namespace, so these names match
   // what `params`/`returnType` reference — declare them on the emitted axiom.
@@ -850,7 +854,7 @@ function stringLiteral(value: string, node: Node): RawExpr {
       throw new Error(
         `${file.getFilePath()}:${line}: string literal contains an unpaired surrogate ` +
         `U+${lone.toString(16).toUpperCase()}, which "string-semantics": "unicode-scalar" cannot ` +
-        `represent; set "string-semantics": "javascript-utf16" and "dafny-library": "local" in lemmascript.json`,
+        `represent; select string-semantics=javascript-utf16 and dafny-library=local in lemmascript.json or //@ option directives`,
       );
     }
   }
@@ -2075,8 +2079,10 @@ function extractFunctionInner(fn: FunctionDeclaration, parentAnnotations?: Annot
 
 // ── Module extraction ────────────────────────────────────────
 
-export function extractModule(sourceFile: SourceFile, options: LscOptions = DEFAULT_OPTIONS): RawModule {
+export function extractModule(sourceFile: SourceFile, options: LscOptions = DEFAULT_OPTIONS,
+  validateDependency: (source: SourceFile) => void = () => {}): RawModule {
   _extractOptions = options;
+  _validateDependency = validateDependency;
   // Seed the fresh-name check (names.ts) before anything mints: every
   // Identifier token in the module, a deliberate over-approximation.
   setUserNames(new Set(sourceFile.getDescendantsOfKind(SyntaxKind.Identifier).map(i => i.getText())));

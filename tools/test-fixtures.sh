@@ -176,6 +176,11 @@ expect_failure \
 expect_absent "$config_fixture/proofs/src/legacy.dfy"
 
 # ── String profile and collection library ─────────────────────────────────
+# The ordinary example selects both options in source, without a JSON config.
+cp examples/utf16.ts "$fixture_dir/utf16-example.ts"
+npx tsx tools/src/lsc.ts check --backend=dafny --time-limit=10 "$fixture_dir/utf16-example.ts"
+grep -Fq '// lsc options: string-semantics=javascript-utf16' "$fixture_dir/utf16-example.dfy.gen"
+
 # Under "string-semantics": "javascript-utf16" a JavaScript string is a UTF-16
 # code-unit sequence: astral characters occupy two Dafny chars and lone
 # surrogates stay representable. The header token is what dafnyVerify maps to
