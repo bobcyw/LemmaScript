@@ -1392,8 +1392,11 @@ Eligible settings use `//@ option <key> <value>` before the first source
 statement. File values override project values; duplicates are errors.
 `proof-dir` mirrors the source's config-relative path under its configured root
 (see SPEC_DAFNY.md §1). `string-semantics` selects which model of JavaScript strings a
-Dafny proof is made under (SPEC_DAFNY.md §4). Source dependencies must use the same
-effective string model; mismatches name both files and are rejected before emission.
+Dafny proof is made under (SPEC_DAFNY.md §4). A source file and the source files it
+imports, directly or indirectly, must use the same `string-semantics` value after
+project settings and file overrides are combined. Declaration files (`.d.ts`)
+are excluded from this comparison. If values differ, `lsc` reports both files
+and stops before generating Dafny.
 `dafny-library` selects standard-library
 or generated local helpers for `filter`, `every`, and `reduce`. UTF-16 requires an explicit
 `"dafny-library": "local"`; omitting it keeps the `stdlib` default and reports an incompatibility.
@@ -1401,7 +1404,9 @@ Unicode-scalar strings support either library choice. `lsc config foo.ts` prints
 options, and resolved Dafny artifact directory; `lsc config` reports defaults
 from the current directory. `backend` is deliberately not a config option.
 
-For a standalone file, put both settings before its first statement:
+To use JavaScript UTF-16 string semantics in a standalone file, add these
+directives before its first statement. These overrides are not needed for the
+default `unicode-scalar` mode:
 
 ```typescript
 //@ backend dafny
