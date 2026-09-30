@@ -28,6 +28,18 @@ export function dafnyCheckDiff(genPath: string, dfyPath: string): boolean {
     }
   }
 
+  // Proof additions must retain the model chosen by the generated companion.
+  try {
+    const generated = readStringSemantics(readFileSync(genPath, "utf-8"));
+    const proof = readStringSemantics(readFileSync(dfyPath, "utf-8"));
+    if (proof !== generated) {
+      throw new Error(`proof string-semantics=${proof} differs from generated string-semantics=${generated}`);
+    }
+  } catch (error) {
+    console.error(`ERROR: ${path.basename(dfyPath)}: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+
   let diff = "";
   try {
     diff = execFileSync(
@@ -69,7 +81,22 @@ export function dafnyCheckDiff(genPath: string, dfyPath: string): boolean {
   return true;
 }
 
-const OPTIONS_HEADER = /^\/\/ lsc options:(.*)$/m;
+/** Read the saved model, rejecting ambiguous headers before verification. */
+function readStringSemantics(content: string): LscOptions["string-semantics"] {
+  const headers = [...content.matchAll(/^\/\/ lsc options:(.*)$/gm)];
+  if (headers.length > 1) throw new Error("generated header: duplicate lsc options header (string-semantics must be unambiguous)");
+  let model = DEFAULT_OPTIONS["string-semantics"];
+  let seen = false;
+  for (const token of (headers[0]?.[1] ?? "").trim().split(/\s+/).filter(Boolean)) {
+    const eq = token.indexOf("=");
+    const key = eq < 0 ? token : token.slice(0, eq);
+    if (key !== "string-semantics") continue;
+    if (seen) throw new Error("generated header: duplicate string-semantics option");
+    seen = true;
+    model = parseOptionValue(key, eq < 0 ? "" : token.slice(eq + 1), "generated header");
+  }
+  return model;
+}
 
 /**
  * Build verifier arguments from the generated file's `// lsc options:` header.
@@ -80,18 +107,11 @@ const OPTIONS_HEADER = /^\/\/ lsc options:(.*)$/m;
  * Other warning categories remain fatal.
  */
 export function dafnyVerifyArgs(content: string, timeLimit?: number, extraFlags?: string): { args: string[]; error?: string } {
-  let stringSemantics: LscOptions["string-semantics"] = DEFAULT_OPTIONS["string-semantics"];
-  const header = content.match(OPTIONS_HEADER);
-  for (const token of (header?.[1] ?? "").trim().split(/\s+/).filter(Boolean)) {
-    const eq = token.indexOf("=");
-    const key = eq < 0 ? token : token.slice(0, eq);
-    const value = eq < 0 ? "" : token.slice(eq + 1);
-    if (key !== "string-semantics") continue;
-    try {
-      stringSemantics = parseOptionValue(key, value, "generated header");
-    } catch (error) {
-      return { args: [], error: `ERROR: ${error instanceof Error ? error.message : String(error)}` };
-    }
+  let stringSemantics: LscOptions["string-semantics"];
+  try {
+    stringSemantics = readStringSemantics(content);
+  } catch (error) {
+    return { args: [], error: `ERROR: ${error instanceof Error ? error.message : String(error)}` };
   }
   const utf16 = stringSemantics === "javascript-utf16";
   const usesStandardLibrary = content.includes("Std.");

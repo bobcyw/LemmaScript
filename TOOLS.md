@@ -60,29 +60,26 @@ Type names: `Expr`, `Stmt`, `Module`, `MatchArm`, `StmtMatchArm`, and `Decl` = `
 `config.ts` owns the `OPTION_SPECS` registry, nearest-ancestor
 `lemmascript.json` discovery, JSON and `//@ option` validation, defaults, and
 cross-option checks. `lsc.ts` merges explicit project values with eligible
-top-of-file overrides and resolves once per source file. It checks that source dependencies
-share the root file's string model, following TypeScript-resolved imports/re-exports and
-compiler-selected cross-file callees before their contracts are copied. Unrelated files
-in the tsconfig are not checked. An explicit `--config` applies to dependencies too;
-each file still applies its own directives. It passes the result
-to extraction/emission; those phases never read config files.
-`string-semantics` is consumed by the Dafny emitter (literal escaping, char-sensitive
-preambles, and the `// lsc options:` header token) and by extraction
-(surrogate literals under the default); `dafnyVerify` derives the char-mode flags from
-that token, never from the config. `dafny-library` selects standard-library or local
-collection helpers. `resolveOptions` rejects UTF-16 with the default or explicit `stdlib`
-choice; callers must select `local` through config or file directives. Collection-library
-choices may differ across dependencies. `emitDafnyFile` also applies this shared check to
-programmatically supplied options. `proof-dir` is
-consumed only by `lsc.ts`, which maps the complete Dafny companion set before
-calling the unchanged Dafny command helpers. `TransformOptions` remains
-backend-intrinsic pipeline configuration and is deliberately separate.
+top-of-file overrides and resolves once per source file, then passes options to
+extraction and emission. Those phases do not read config files.
+
+Before copying cross-file contracts, the CLI checks that dependencies share the
+root's string model, following imports, re-exports, and selected callees.
+`string-semantics` controls literal validation, Dafny character helpers, and the
+saved model header. Verification reads that header and the additions-only gate
+checks it against the generated companion. `dafny-library` independently selects
+collection helpers; the shared compatibility check requires `local` for UTF-16.
+See [DESIGN_STRINGS.md](DESIGN_STRINGS.md) for the model boundaries.
+
+`proof-dir` is consumed only by `lsc.ts`, which maps the complete Dafny companion
+set before calling the command helpers. `TransformOptions` remains separate
+backend-intrinsic pipeline configuration.
 
 ## Method Calls
 
 All TS `receiver.method(args)` calls produce `methodCall` IR nodes carrying the receiver, its type, the TS method name, the args, and a `monadic` flag. No renaming — the IR stores the TS name (`"map"`, `"indexOf"`, `"with"`, `"get"`, etc.) and the receiver type disambiguates.
 
-Each emitter dispatches on `(receiverTy, method)` to decide syntax. For example, `(array, "filter")` → Lean: `arr.filter f`, Dafny: `Seq.Filter(f, arr)`. Unsupported `(type, method)` pairs error at emit time.
+Each emitter dispatches on `(receiverTy, method)` to decide syntax. For example, `(array, "filter")` → Lean: `arr.filter f`, Dafny: `Std.Collections.Seq.Filter(f, arr)` by default (`SeqFilter(f, arr)` with `dafny-library: local`). Unsupported `(type, method)` pairs error at emit time.
 
 `app` is reserved for receiver-less calls: user-defined functions, `Pure.fnName(...)`, `JSFloorDiv(a, b)`, `SetToSeq(s)`.
 

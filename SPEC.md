@@ -452,6 +452,10 @@ The same coercion applies to non-bool conditions in `if`/`while`/`?:` positions:
 
 ### 3.2 Special Forms
 
+The collection rows show the default `dafny-library: stdlib` setting.
+With `local`, `SeqFilter` and `SeqAll` replace the corresponding
+`Std.Collections.Seq` helpers (§7.6).
+
 | Spec / TS | Lean | Dafny |
 |-----------|------|-------|
 | `arr.length` | `arr.size` | `\|arr\|` |
@@ -486,8 +490,8 @@ The same coercion applies to non-bool conditions in `if`/`while`/`?:` positions:
 | `Math.max(...s)` / `Math.min(...s)` | — | `MaxOfSeq(s)` / `MinOfSeq(s)` (requires `\|s\| > 0`) |
 | `perm(a, b)` (spec-only) | — | `Perm(a, b)` (preamble: `predicate Perm<T(==)>(a, b) { multiset(a) == multiset(b) }`) |
 | `arr.map((x) => e)` | `arr.map (fun x => e)` | `seq(\|arr\|, i requires 0 <= i < \|arr\| => var x := arr[i]; e)` (§3.7) |
-| `arr.filter((x) => e)` | `arr.filter (fun x => e)` | `SeqFilter((x) => e, arr)` |
-| `arr.every((x) => e)` | `arr.all (fun x => e)` | `SeqAll(arr, (x) => e)` |
+| `arr.filter((x) => e)` | `arr.filter (fun x => e)` | `Std.Collections.Seq.Filter((x) => e, arr)` |
+| `arr.every((x) => e)` | `arr.all (fun x => e)` | `Std.Collections.Seq.All(arr, (x) => e)` |
 | `arr.some((x) => e)` | `arr.any (fun x => e)` | `exists x :: x in arr && e` |
 | `arr.includes(x)` | `arr.contains x` | `(x in arr)` |
 | `arr.indexOf(x)` | — | `SeqIndexOf(arr, x)` (preamble) |
@@ -668,8 +672,8 @@ The transform uses two strategies for translating `receiver.method(args)`:
 | `[...arr, e]` | `arrayPush` | `Array.push arr e` | `(arr + [e])` |
 | `arr.with(i, v)` | `arraySet` | `arr.set! i v` | `arr[i := v]` |
 | `arr.map(f)` | `map` | `arr.map f` | seq comprehension (§3.7) |
-| `arr.filter(f)` | `filter` | `arr.filter f` | `SeqFilter(f, arr)` |
-| `arr.every(f)` | `every` | `arr.all f` | `SeqAll(arr, f)` |
+| `arr.filter(f)` | `filter` | `arr.filter f` | `Std.Collections.Seq.Filter(f, arr)` |
+| `arr.every(f)` | `every` | `arr.all f` | `Std.Collections.Seq.All(arr, f)` |
 | `arr.some(f)` | `some` | `arr.any f` | `exists x :: x in arr && ...` |
 | `arr.includes(x)` | `includes` | `arr.contains x` | `(x in arr)` |
 | `arr.indexOf(x)` | `indexOf` | — | `SeqIndexOf(arr, x)` |
@@ -681,6 +685,9 @@ The transform uses two strategies for translating `receiver.method(args)`:
 | `s.has(x)` | `setHas` | `s.contains x` | `(x in s)` |
 | `s.add(x)` | `setAdd` | `s.insert x` | `(s + {x})` |
 | `s.delete(x)` | `setDelete` | `s.erase x` | `(s - {x})` |
+
+Dafny collection entries use the default `stdlib` setting; `local` uses
+`SeqFilter` and `SeqAll` instead (§7.6).
 
 The transform checks helper-function methods first, then dot-notation methods. If neither matches, it errors.
 

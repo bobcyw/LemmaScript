@@ -43,25 +43,10 @@ for (const [method, helper, resultType] of [
   });
 }
 
-for (const [name, declaration] of [
-  ["string type without literals", stringType],
-  ["nested string type", { kind: "type-alias", name: "Texts", target: {
-    kind: "optional", inner: { kind: "array", elem: { kind: "string" } },
-  } }],
-  ["string literals without string annotations", { kind: "const", name: "same", type: { kind: "bool" }, value: {
-    kind: "binop", op: "==", left: { kind: "str", value: "hello" }, right: { kind: "str", value: "hello" },
-  } }],
-] satisfies [string, Decl][]) {
-  test(`string usage resets between files after ${name}`, () => {
-    const baseline = emitDafnyFile(numbers, "numbers.ts", utf16);
-    assert.doesNotMatch(baseline, optionsHeader);
-    assert.match(emitDafnyFile(moduleWith(declaration), "strings.ts", utf16), optionsHeader);
-    assert.equal(emitDafnyFile(numbers, "numbers.ts", utf16), baseline);
-  });
-}
-
-test("string usage remains set across declarations within one file", () => {
-  assert.match(emitDafnyFile(moduleWith(stringType, ...numbers.decls), "mixed.ts", utf16), optionsHeader);
+test("UTF-16 stamps numeric-only modules so proof additions use the selected model", () => {
+  assert.match(emitDafnyFile(numbers, "numbers.ts", utf16), optionsHeader);
+  assert.doesNotMatch(emitDafnyFile(numbers, "numbers.ts"), optionsHeader);
+  assert.match(emitDafnyFile(numbers, "numbers.ts", utf16), optionsHeader);
 });
 
 test("string profile and literal encoding reset between files", () => {
@@ -90,7 +75,7 @@ test("string helper preambles do not leak into the next file", () => {
 });
 
 for (const inNamespace of [false, true]) {
-  test(`string usage resets after failed emission${inNamespace ? " inside a namespace" : ""}`, () => {
+  test(`string profile resets after failed emission${inNamespace ? " inside a namespace" : ""}`, () => {
     const baseline = emitDafnyFile(numbers, "numbers.ts", utf16);
     const declarations: Decl[] = [stringType, {
       kind: "const", name: "unsupported", type: { kind: "int" }, value: {

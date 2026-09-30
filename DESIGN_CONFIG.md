@@ -104,32 +104,22 @@ The source must be inside the config directory when `proof-dir` is set (includin
 
 Enabling the option must not silently strand proof additions. If the mapped `.dfy` is absent but a sibling `.dfy`, `.dfy.base`, or `.dfy.merged` exists beside the TS, `lsc` fails with paths and tells the user to move the hand-written `.dfy`, discard or inspect merge-state files, and rerun; `.dfy.gen` is regeneratable. Changing from one non-default proof directory to another likewise requires moving the proof first and is documented as a migration, because the new config cannot discover an arbitrary old root.
 
-## String and collection options (PR #211, issue #210)
+### 3.4 String and collection options
 
-`string-semantics: "unicode-scalar" | "javascript-utf16"` chooses the string model,
-defaulting to `unicode-scalar`. `dafny-library: "stdlib" | "local"` independently chooses
-the generated collection helpers, defaulting to `stdlib`. Both accept top-of-file
-`//@ option` directives, which override project settings before compatibility is checked.
-The ordinary [UTF-16 example](examples/utf16.ts) needs no JSON config.
+`string-semantics` selects `unicode-scalar` (default) or `javascript-utf16`.
+The independent `dafny-library` option selects `stdlib` (default) or `local`
+collection helpers. Both accept file overrides. UTF-16 requires an explicit
+`local` choice; `resolveOptions` rejects incompatible effective settings after
+project values and file directives are merged. Lean rejects UTF-16.
 
-The CLI follows TypeScript-resolved source dependencies and checks their effective string
-models against the root file before emission. It also checks compiler-selected cross-file
-callees before extraction copies their contracts, including global declarations without
-an import edge. Cycles are visited once; unrelated tsconfig files are not dependencies.
-Declaration files carry no model, but their re-exports are followed. `--config` pins the
-project settings for dependencies too; file directives still apply separately. Different
-collection-library choices are allowed because they do not reinterpret contracts.
+Source dependencies must use the same effective string model before their
+contracts are copied. The check follows imports, re-exports, and compiler-selected
+cross-file callees; unrelated files are excluded. An explicit `--config` applies
+to dependencies too, while each file retains its directives. Collection-library
+choices may differ because they do not reinterpret contracts.
 
-`stdlib` emits `Std.Collections.Seq.Filter/All/FoldLeft` for `filter`/`every`/`reduce`;
-`local` emits `SeqFilter`/`SeqAll`/`SeqFoldLeft` definitions on demand. Unicode-scalar
-projects may select either. UTF-16 requires an explicit `local` choice: `resolveOptions`
-rejects both an omitted and an explicit `stdlib`, without silently changing the default.
-
-UTF-16 string-bearing artifacts record their model in the header; verification uses
-`--unicode-char:false --allow-deprecation`. The precompiled Dafny standard library uses
-Unicode-scalar characters and cannot load in that mode. The artifact-level check still
-rejects `Std.*` in UTF-16 proof additions; config validation cannot inspect handwritten
-proof text. The library choice itself requires no additional verifier flag.
+See [DESIGN_STRINGS.md](DESIGN_STRINGS.md) for emission and verification behavior,
+and [SPEC.md §7.6](SPEC.md#76-project-configuration-lemmascriptjson) for setup.
 
 ## Future options
 
@@ -161,9 +151,15 @@ Options requiring non-default verifier flags are recorded in the artifact, so a 
 // lsc options: string-semantics=javascript-utf16
 ```
 
-The line contains space-separated option tokens. UTF-16 appears only when the file has strings and selects `--unicode-char:false --allow-deprecation`. `dafny-library` does not need a token because it changes emitted helpers, not verifier flags. A future number-model marker can use the same mechanism. The additions-only check guarantees `.dfy` and `.dfy.gen` share the header, so changing a model surfaces as a generator change: `regen` merges the new header before verification.
+Every UTF-16-selected file receives the token, including files whose declarations
+have no string types. `dafny-library` needs no token because it changes generated
+helpers rather than verifier flags. The verifier reads the saved model;
+without a token it uses Unicode-scalar mode. Existing scalar headers are unchanged.
 
-Without a string-model token, verification explicitly uses `--unicode-char:true`. Existing scalar artifacts therefore need no header change.
+Parsing rejects unknown models, duplicate options headers, and duplicate string-model tokens.
+The additions-only gate compares the proof's model with its generated companion,
+so an inserted header cannot override it. A model change requires `regen` to
+merge the new generated header before verification.
 
 ## 6. CLI surface
 
@@ -195,9 +191,3 @@ Without a string-model token, verification explicitly uses `--unicode-char:true`
 - `time-limit` / `extra-flags` as project defaults. `LemmaScript-files.txt` already carries them per file; adding a project-wide default is a registry entry away if a case study asks.
 - JSON Schema generation (`lsc config --schema`). Cheap follow-up from the registry; not needed to land.
 - Options in the Raw IR JSON (`lsc extract`). The IR already reflects their effect (`RawExtern.impure`).
-
-## Open questions
-
-1. **Resolved string option shape.** `string-semantics: "unicode-scalar" | "javascript-utf16"` selects the string model. The independent `dafny-library` option selects collection helpers.
-2. **Resolved warning scope.** UTF-16 uses `--allow-deprecation` for Dafny's character-mode flag. Other warnings remain fatal.
-3. **Header parsing.** Should `dafnyVerify` warn when a `.dfy` lacks the `// Generated by lsc` line entirely? It currently accepts such files and uses the default string model when no options header is present.
