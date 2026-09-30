@@ -237,21 +237,20 @@ or case-study file regenerates.
 | `unicode-scalar` | `--unicode-char:true` — an explicit pin of today's default. A default is not a pin; verifying under a changed setting would silently reinterpret every string obligation. |
 | `javascript-utf16` | `--unicode-char:false --allow-deprecation` |
 
-#211 passes `--allow-warnings`, because Dafny 4.11 prints
-`CLI: Warning: the option unicode-char has been deprecated.` and, by default, any warning
-fails the run (`--allow-warnings` still prints it and only un-fatals it; `--allow-deprecation`
-removes it). But `--allow-warnings` un-fatals *every* warning in the file — including
-`warn-contradictory-assumptions` (a `requires` proved vacuous) and the missing-`{:axiom}`
-warning, which are exactly the guards a verifier most needs. Dafny 4.11 has the narrow
-alternative, `--allow-deprecation`: "Do not warn about the use of deprecated features."
-Measured on 4.11.0: with `unicode-char = false`, `allow-deprecation = true`, and
-`allow-warnings = false`, a surrogate literal verifies with no warning, and a method with
-`requires false` under `warn-contradictory-assumptions` still fails the run. That resolves
-[DESIGN_CONFIG.md](DESIGN_CONFIG.md) open question 2: the `unicode-char` deprecation — and,
-by the flag's definition, every other *deprecated-feature* warning, which are style warnings —
-is suppressed; `warn-contradictory-assumptions`, missing-`{:axiom}` (bodiless `ensures`,
-`assume`), `{:verify false}`, and missing-trigger warnings all remain fatal (measured on
-4.11.0).
+`dafnyVerifyArgs` reads the generated header and supplies the flags above. Dafny
+4.11 deprecates `--unicode-char:false`, so UTF-16 verification adds
+`--allow-deprecation`. This suppresses deprecated-feature warnings, including the
+character-mode warning; other warning categories remain fatal under the default
+verification policy.
+
+Using `--allow-warnings` would also allow verification to succeed despite warnings
+about contradictory assumptions or missing `{:axiom}` declarations. The narrower
+flag preserves those checks. Measured on Dafny 4.11.0 with `unicode-char = false`,
+`allow-deprecation = true`, and `allow-warnings = false`: a surrogate literal
+verifies with no warning, while `requires false` under
+`warn-contradictory-assumptions` still fails the run. Missing-`{:axiom}` (bodiless
+`ensures`, `assume`), `{:verify false}`, and missing-trigger warnings also remain
+fatal. This resolves [DESIGN_CONFIG.md](DESIGN_CONFIG.md) open question 2.
 
 Two facts that make this safe, both measured on Dafny 4.11.0. `--unicode-char:true` is
 silent — only the `:false` value is warned as deprecated — so pinning the default costs

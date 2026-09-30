@@ -144,15 +144,12 @@ to the character-mode compatibility check below. Selecting `local` does not chan
 
 Standard libraries are auto-detected: if `foo.dfy` contains `import Std.`, the `--standard-libraries` flag is added.
 
-The char mode is read from the artifact, not the config, so a standalone `.dfy`
-verifies under the model it was generated for: `dafnyVerify` pins
-`--unicode-char:true` unless the header carries
-`// lsc options: string-semantics=javascript-utf16`, in which case it passes
-`--unicode-char:false --allow-deprecation` (only the `:false` value is deprecated
-in Dafny 4.11; `--allow-deprecation` waives exactly that warning, whereas
-`--allow-warnings` would also un-fatal vacuity and missing-`{:axiom}` warnings).
-Dafny's precompiled standard library cannot load under `--unicode-char:false`, so
-a `javascript-utf16` proof whose additions import `Std.*` fails closed with an
-error naming `string-semantics`; a `unicode-scalar` proof may use it freely.
+`lsc` verifies each `.dfy` using the string semantics recorded in its generated
+header, even if the project configuration has changed. A file without a
+`string-semantics` header uses `unicode-scalar`.
+
+Proofs using `javascript-utf16` cannot import Dafny's precompiled standard library
+(`Std.*`); verification reports an error if they do. Proofs using `unicode-scalar`
+can use that library.
 
 The shared `--time-limit=<seconds>` flag (SPEC.md §7) maps to Dafny's `--verification-time-limit`; `--extra-flags=<string>` is forwarded verbatim to `dafny verify`.
