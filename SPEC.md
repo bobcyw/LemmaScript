@@ -1021,12 +1021,10 @@ The spec body is purely additive — `regen` three-way-merges and preserves user
 | `A \| B` (union param) | field intersection type | field intersection type |
 | Anything else | Pass through | Pass through |
 
-For the Dafny backend, `string` is verified in Dafny's UTF-16 code-unit
-character mode (`--unicode-char:false`). This matches JavaScript's observable
-`.length`, indexing, slicing, `charCodeAt`, and equality semantics, including
-astral characters occupying two positions and unpaired surrogate code units.
-Non-ASCII source literals are emitted as `\\uXXXX` code-unit escapes so the
-generated UTF-8 file preserves the exact JavaScript value.
+For the Dafny backend, `string` uses Unicode-scalar semantics by default.
+To use JavaScript's UTF-16 code-unit model, select
+`"string-semantics": "javascript-utf16"` and `"dafny-library": "local"`
+(§7.6). See SPEC_DAFNY.md §4 for the behavior and limitations of each model.
 
 `lsc` reads parameter and variable types from ts-morph. Primitive types are mapped per the table. User-defined types (like `State`, `Event`) are passed through by name — the corresponding backend type is generated from the TS type declaration.
 
