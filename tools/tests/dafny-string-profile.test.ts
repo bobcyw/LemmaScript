@@ -97,3 +97,26 @@ test("numeric-returning surrogate operations verify through the frontend in UTF-
     assert.ok(readFileSync(f.gen, "utf8").includes(header));
   });
 });
+
+test("Std. text and proof comments verify through the frontend in UTF-16 mode", () => {
+  const source = "//@ backend dafny\n" + utf16 + `export function literalLength(): number {
+  //@ verify
+  //@ ensures \\result === 4
+  return "Std.".length;
+}
+`;
+  assert.equal("Std.".length, 4);
+  fixture(source, false, f => {
+    const generated = f.cli(["gen"]);
+    assert.equal(generated.status, 0, generated.output);
+    const original = readFileSync(f.proof, "utf8");
+    assert.ok(original.includes(header));
+    assert.ok(original.includes('"Std."'));
+    writeFileSync(f.proof, original + '\n// Std.Arithmetic.Mul is only text, not an import.\n'
+      + '/* A nested /* Std.Collections.Seq.All */ proof comment. */\n');
+    const result = f.cli(["check"]);
+    assert.equal(result.status, 0, result.output);
+    assert.match(result.output, /0 errors/);
+    assert.equal(readFileSync(f.gen, "utf8"), original);
+  });
+});

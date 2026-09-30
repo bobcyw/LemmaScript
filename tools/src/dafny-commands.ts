@@ -98,6 +98,62 @@ function readStringSemantics(content: string): LscOptions["string-semantics"] {
   return model;
 }
 
+/** Detect Std-qualified code references, not text inside literals or comments. */
+function usesDafnyStandardLibrary(content: string): boolean {
+  const identifier = /[A-Za-z0-9_'?]+/y;
+  const character = /'(?:[^\uD800-\uDFFF'\\\r\n]|\\(?:['"\\0nrt]|u[\da-fA-F]{4}|U\{[\da-fA-F](?:_?[\da-fA-F])*\}))'/uy;
+  let i = 0;
+  let std = false;
+  while (i < content.length) {
+    if (/\s/.test(content[i])) { i++; continue; }
+    if (content.startsWith("//", i)) {
+      const newline = content.indexOf("\n", i + 2);
+      i = newline < 0 ? content.length : newline + 1;
+      continue;
+    }
+    if (content.startsWith("/*", i)) {
+      let depth = 1;
+      i += 2;
+      while (i < content.length && depth > 0) {
+        if (content.startsWith("/*", i)) { depth++; i += 2; }
+        else if (content.startsWith("*/", i)) { depth--; i += 2; }
+        else i++;
+      }
+      continue;
+    }
+    const verbatim = content.startsWith('@"', i);
+    if (verbatim || content[i] === '"') {
+      std = false;
+      i += verbatim ? 2 : 1;
+      while (i < content.length) {
+        if (verbatim && content.startsWith('""', i)) { i += 2; }
+        else if (content[i] === '"') { i++; break; }
+        else if (!verbatim && content[i] === "\\") i += 2;
+        else i++;
+      }
+      continue;
+    }
+    // Apostrophes also occur in identifiers; use the longest token match.
+    identifier.lastIndex = character.lastIndex = i;
+    const word = identifier.exec(content);
+    const char = content[i] === "'" ? character.exec(content) : null;
+    if (char && (!word || char[0].length >= word[0].length)) {
+      std = false;
+      i = character.lastIndex;
+      continue;
+    }
+    if (word) {
+      std = word[0] === "Std";
+      i = identifier.lastIndex;
+      continue;
+    }
+    if (std && content[i] === "." && !content.startsWith("..", i)) return true;
+    std = false;
+    i++;
+  }
+  return false;
+}
+
 /**
  * Build verifier arguments from the generated file's `// lsc options:` header.
  * Reading the saved string model instead of the current project config keeps
@@ -114,7 +170,7 @@ export function dafnyVerifyArgs(content: string, timeLimit?: number, extraFlags?
     return { args: [], error: `ERROR: ${error instanceof Error ? error.message : String(error)}` };
   }
   const utf16 = stringSemantics === "javascript-utf16";
-  const usesStandardLibrary = content.includes("Std.");
+  const usesStandardLibrary = usesDafnyStandardLibrary(content);
   if (utf16 && usesStandardLibrary) {
     return { args: [], error:
       "ERROR: this proof combines \"string-semantics\": \"javascript-utf16\" with Dafny's standard library. " +
