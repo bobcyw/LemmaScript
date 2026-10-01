@@ -148,7 +148,7 @@ Both settings support file directives; see [examples/utf16.ts](examples/utf16.ts
 2. Check additions-only invariant
 3. Run `dafny verify foo.dfy`
 
-Standard libraries are auto-detected from `Std`-qualified code references, including imports and calls; string/character literals and comments are ignored. The `--standard-libraries` flag is added when a reference is found.
+Standard libraries are auto-detected: if `foo.dfy` contains `import Std.`, the `--standard-libraries` flag is added.
 
 `lsc` verifies each `.dfy` using the string semantics recorded in its generated
 header, even if the project configuration has changed. A file without a

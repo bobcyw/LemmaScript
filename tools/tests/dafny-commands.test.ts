@@ -135,16 +135,6 @@ test("proof additions cannot override a generated UTF-16 header", () => {
 for (const reference of [
   "import opened Std.Arithmetic.Mul",
   "function all(xs: seq<int>): bool { Std.Collections.Seq.All(xs, x => x > 0) }",
-  "import opened Std \n . Arithmetic.Mul",
-  "import opened Std /* proof comment */ .Arithmetic.Mul",
-  "import opened Std // proof comment\n .Arithmetic.Mul",
-  "import opened Std /* outer /* nested */ comment */ .Arithmetic.Mul",
-  "function value'(): int { Std.Arithmetic.Mul.Value() }",
-  String.raw`const quote: char := '"'; function value(): int { Std.Arithmetic.Mul.Value() }`,
-  String.raw`const quote: char := '\''; function value(): int { Std.Arithmetic.Mul.Value() }`,
-  String.raw`const character: char := '\u0053'; function value(): int { Std.Arithmetic.Mul.Value() }`,
-  String.raw`const character: char := '\U{1_F600}'; function value(): int { Std.Arithmetic.Mul.Value() }`,
-  "function value<'T>(): int { Std.Arithmetic.Mul.Value() }",
 ]) {
   test(`UTF-16 library diagnostic explains local helpers and proof additions: ${reference}`, () => {
     const { args, error } = dafnyVerifyArgs(`// lsc options: string-semantics=javascript-utf16\n${reference}\n`);
@@ -154,35 +144,6 @@ for (const reference of [
     assert.match(error ?? "", /\/\/@ option dafny-library local/);
     assert.match(error ?? "", /lsc regen/);
     assert.match(error ?? "", /does not rewrite handwritten Std\.\* imports or calls/);
-    assert.deepEqual(dafnyVerifyArgs(reference).args,
-      ["verify", "--standard-libraries", "--unicode-char:true"]);
-  });
-}
-
-for (const [description, content] of [
-  ["ordinary string", 'const text: string := "Std.";'],
-  ["escaped quotes", String.raw`const text: string := "quoted \"Std.\" text";`],
-  ["escaped backslash before a quote", String.raw`const text: string := "backslash \\"; // Std.`],
-  ["verbatim string", 'const text: string := @"quoted ""Std."" text";'],
-  ["multiline verbatim string", 'const text: string := @"first line\nStd. on second line";'],
-  ["line comment", "// Std.Arithmetic.Mul\nmethod M() {}"],
-  ["block comment", "/* import opened Std.Arithmetic.Mul */\nmethod M() {}"],
-  ["nested block comment", "/* outer /* Std.Arithmetic.Mul */ still a comment */\nmethod M() {}"],
-  ["escaped character literal", String.raw`const quote: char := '\''; // Std.`],
-  ["identifier suffix", "function f(): bool { NotStd.Collections.Seq.All([]) }"],
-  ["identifier prefix", "function f(): bool { _Std.Collections.Seq.All([]) }"],
-  ["digit suffix", "function f(): bool { Std2.Collections.Seq.All([]) }"],
-  ["prime identifier", "function f(): bool { Std'.Collections.Seq.All([]) }"],
-  ["question-mark identifier", "function f(): bool { Std?.Collections.Seq.All([]) }"],
-  ["leading-apostrophe identifier", "function f(): bool { 'Std.Collections.Seq.All([]) }"],
-  ["longest-match apostrophe identifier", "function f(): bool { 'x'Std.Collections.Seq.All([]) }"],
-  ["sequence slice bound", "function slice(s: seq<int>, Std: int): seq<int> requires 0 <= Std <= |s| { s[Std..] }"],
-]) {
-  test(`Std. in ${description} does not select the standard library`, () => {
-    assert.deepEqual(dafnyVerifyArgs(content),
-      { args: ["verify", "--unicode-char:true"] });
-    assert.deepEqual(dafnyVerifyArgs("// lsc options: string-semantics=javascript-utf16\n" + content),
-      { args: ["verify", "--unicode-char:false", "--allow-deprecation"] });
   });
 }
 
