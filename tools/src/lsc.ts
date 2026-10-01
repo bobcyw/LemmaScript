@@ -361,11 +361,15 @@ function runFile(
 
   // Validate the actual dependency graph, not unrelated files in the tsconfig.
   // Library selection may differ; only the string model changes contract meaning.
-  const validateDependency = stringModelValidator(sourceFile, options, configPath);
-  validateDependency(sourceFile);
+  // F* always uses UTF-16, independently of these Dafny profile settings.
+  const validateDependency = backend === "fstar" ? undefined : stringModelValidator(sourceFile, options, configPath);
+  validateDependency?.(sourceFile);
+  const extractionOptions: LscOptions = backend === "fstar"
+    ? { ...options, "string-semantics": "javascript-utf16" }
+    : options;
 
   // Extract: ts-morph → Raw IR
-  const raw = extractModule(sourceFile, options, validateDependency);
+  const raw = extractModule(sourceFile, extractionOptions, validateDependency);
 
   if (cmd === "extract") {
     console.log(JSON.stringify(raw, null, 2));

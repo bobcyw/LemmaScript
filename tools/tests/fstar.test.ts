@@ -12,6 +12,7 @@ import { extractModule } from "../src/extract.ts";
 import { resolveModule } from "../src/resolve.ts";
 import { autoHavocModule } from "../src/autohavoc.ts";
 import { narrowModule } from "../src/narrow.ts";
+import { DEFAULT_OPTIONS } from "../src/config.ts";
 import { emitFstarFile } from "../src/fstar-emit.ts";
 import { checkFstarSource } from "../src/fstar-source.ts";
 import { checkFstarProof, fstarFlags, fstarPaths, migrateFstarArtifacts, fstarVerify, fstarRegen, fstarCheckDiff } from "../src/fstar-commands.ts";
@@ -27,7 +28,7 @@ const realFstar = { skip: !installed, timeout: 60_000 };
 function compile(source: string, module = "Test"): string {
   const project = new Project({ useInMemoryFileSystem: true, compilerOptions: { strict: true, target: ScriptTarget.ESNext } });
   const file = project.createSourceFile("input.ts", source);
-  const raw = extractModule(file);
+  const raw = extractModule(file, { ...DEFAULT_OPTIONS, "string-semantics": "javascript-utf16" });
   checkFstarSource(file, raw);
   return emitFstarFile(autoHavocModule(narrowModule(resolveModule(raw))), module);
 }
@@ -233,6 +234,25 @@ test("string ordering uses UTF-16 lexicographic comparisons and proper prefixes"
   assert.equal(verify(source), true);
   assert.equal(verify(source.replace('"\\uD83D\\uDE00" <', '"\\uD83D\\uDE00" >')), false);
 });
+
+test("F* CLI keeps native UTF-16 literals across different Dafny source profiles", () => temporary(dir => {
+  writeFileSync(join(dir, "library.ts"), String.raw`//@ option string-semantics javascript-utf16
+//@ option dafny-library local
+export function identity(value:string):string {
+  //@ ensures \result === value
+  return value;
+}
+`);
+  writeFileSync(join(dir, "source.ts"), String.raw`import { identity } from "./library";
+export function codeUnit():number {
+  //@ ensures \result === 0xD800
+  return identity("\uD800").charCodeAt(0);
+}
+`);
+  const result = runCli(dir, ["gen", "--backend=fstar", "source.ts"]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(readFileSync(join(dir, "source.fst.gen"), "utf8"), /S\.build \(S\.empty\) \(55296\)/);
+}));
 
 for (const [label, code] of [
   ["false postcondition", String.raw`export function bad(x:number):number {

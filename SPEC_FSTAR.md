@@ -40,7 +40,7 @@ These examples exercise higher-order reasoning, including general application, w
 | Construct | Representation and limits |
 | --- | --- |
 | Numbers | Mathematical `int`, `nat`, `real`; `bigint` retains signed truncating division/remainder semantics. Bare numeric division is real division; `Math.floor(a/b)` rounds downward. Unsafe integer literals are rejected. |
-| Strings | Sequences of UTF-16 code units, including indexing, slicing, concatenation, searching, trimming and lexicographic comparison. The runtime proves string-order totality and transitivity. Unicode case conversion is a deterministic unconstrained library abstraction. |
+| Strings | Sequences of UTF-16 code units, including indexing, slicing, concatenation, searching, trimming and lexicographic comparison. This native model is independent of the Dafny-only `string-semantics` and `dafny-library` options. The runtime proves string-order totality and transitivity. Unicode case conversion is a deterministic unconstrained library abstraction. |
 | Arrays | `FStar.Sequence`, with checked indexing, value updates, slicing, searching, map/filter/fold and sorting. Sorting requires a total preorder and preserves multiplicities. Runtime array identity comparison is rejected. |
 | Maps and sets | F* finite maps/sets. String keys use a proved sequence-to-list encoding to obtain decidable key equality. Iteration follows the existing unordered collection model. |
 | Data types | Options, tuples, records, tagged unions, enums, aliases and generics. Optional record fields default to `None`. Opaque values have no observable constructors. Runtime equality between potentially reference-valued operands is rejected; null/undefined checks remain supported. |

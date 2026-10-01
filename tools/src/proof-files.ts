@@ -66,7 +66,7 @@ export function proofCheckDiff(genPath: string, proofPath: string): boolean {
   return true;
 }
 
-export function proofRegen(genPath: string, proofPath: string, basePath: string, text: string, verify: () => boolean, noVerify = false) {
+export function proofRegen(genPath: string, proofPath: string, basePath: string, text: string, verify: () => boolean, noVerify = false, checkDiff = proofCheckDiff) {
   // 1. Read old gen before overwriting (needed for base seeding)
   const oldGen = existsSync(genPath) ? readFileSync(genPath, "utf-8") : "";
 
@@ -107,8 +107,8 @@ export function proofRegen(genPath: string, proofPath: string, basePath: string,
     }
   }
 
-  // 6. Check gen invariant (unconditional)
-  if (!proofCheckDiff(genPath, proofPath)) {
+  // 6. Check gen invariant, including backend-specific guards (even under --no-verify).
+  if (!checkDiff(genPath, proofPath)) {
     console.error(`FAILED: ${path.basename(proofPath)} has modifications to generated lines.`);
     process.exit(1);
   }
