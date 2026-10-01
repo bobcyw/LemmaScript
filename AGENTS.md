@@ -6,7 +6,7 @@ Guidance for AI coding agents working on LemmaScript itself or on projects that 
 
 A verification toolchain for TypeScript. The user writes ordinary TS with `//@ ` annotations. `lsc` generates either:
 - **Dafny** — one `.dfy.gen` (always regeneratable) + one `.dfy` (the source of truth where proof additions accumulate). Diff must be additions-only.
-- **Lean 4 / Velvet / Loom** — four files: `.types.lean` + `.def.lean` are generated; `.spec.lean` + `.proof.lean` are hand-written.
+- **Lean 4 / Velvet 2** — four files: `.types.lean` + `.def.lean` are generated; `.spec.lean` + `.proof.lean` are hand-written.
 
 Whatever you do, the TS file is the source of truth for *the program*. The hand-written verification files are the source of truth for *the proof*. Don't conflate them.
 
@@ -106,6 +106,8 @@ import opened Std.Arithmetic.DivMod     // LemmaMulStrictInequality(x,y,z): x<y 
 `lsc`'s `dafnyVerify` (`tools/dist/dafny-commands.js`) **auto-adds `--standard-libraries` whenever the `.dfy` text contains the substring `Std.`** — so an `import opened` is all you need; no CLI flag or config change, and `lsc check` picks it up. (Exception: a project with `"string-semantics": "javascript-utf16"` cannot use `Std.*` — Dafny's standard library does not load under `--unicode-char:false`; `lsc check` refuses the combination with a message naming the key.) The imports go in as an *inserted* block (additions-only — don't touch the generated header). Euclidean identities (`x == x/p*p + x%p`, `0 <= x%p < p`) and small distributivity (`(k+1)*p == k*p + p`) *are* reliable inline; reserve the library for the cancellation and monotonicity goals.
 
 ## Lean verification workflow
+
+Use the sibling `../velvet` checkout on **`lemma2`** and the Lean version pinned in `lean-toolchain`. The older `lemma` branch targets Velvet 1. Velvet 2 does not need a Loom checkout or external SMT solver downloads; see [README.md](README.md#setup) for clone and checkout commands.
 
 `lake build` runs the full chain. With Velvet 2, start with `velvet_vcgen [methodName] with finish`. Keep common VC processing inside `velvet_vcgen` so the discharger can reuse its shared solver state:
 

@@ -4,7 +4,7 @@
 **Date:** September 2026
 
 Backend-specific details:
-- [SPEC_LEAN.md](SPEC_LEAN.md) — Lean backend (Velvet/Loom, four-file scheme, proof workflow)
+- [SPEC_LEAN.md](SPEC_LEAN.md) — Lean backend (Velvet 2, four-file scheme, proof workflow)
 - [SPEC_DAFNY.md](SPEC_DAFNY.md) — Dafny backend (two-file scheme, regen workflow)
 
 ---
@@ -15,7 +15,7 @@ LemmaScript is a verification toolchain for TypeScript. The user writes TypeScri
 
 The toolchain has two components:
 1. **`lsc` CLI** (Node.js) — parses TS, generates verification artifacts for the selected backend
-2. **Backend-specific libraries** — Lean: LemmaScript Lean library (re-exports Velvet/Loom). Dafny: helper preambles auto-injected.
+2. **Backend-specific libraries** — Lean: LemmaScript Lean library (re-exports Velvet 2 and supporting Mathlib imports). Dafny: helper preambles auto-injected.
 
 ---
 
@@ -843,7 +843,7 @@ while condition'
 
 **Decreasing clause:** Emitted directly as a backend expression. Both backends accept well-founded relations — `Nat`/`nat`, lexicographic tuples, etc.
 
-**`done_with` clause:** If the loop body contains `break`, the user should add a `//@ done_with` annotation specifying what is true when the loop exits. (Lean: if omitted, Velvet defaults to the negation of the loop condition, which is only correct when there is no `break`. Dafny: not needed, the verifier handles break paths automatically.)
+**`done_with` clause:** On the Lean backend, a loop containing `break` must have a `//@ done_with` annotation specifying what is true when it exits; `lsc` rejects a missing annotation, including when an early return lowers to a break. Use `//@ done_with true` when the invariants already carry the needed exit facts. Dafny derives break paths automatically and does not require this annotation.
 
 **C-style `for (init; cond; update)` loops** are desugared at extract time to the equivalent `init; while (cond) { body; update; }`. The loop variable from `init` is forced mutable so the update can mutate it. The update is a bare `Expression` in TS (not wrapped in an `ExpressionStatement`), but is routed through the same statement-position desugaring as `i++;` standalone — `i++`/`i--` become `i = i ± 1`, compound assignments become their plain-assignment equivalents. `//@ invariant` and `//@ decreases` annotations placed in the for-loop body carry through to the desugared `while`.
 
@@ -851,7 +851,7 @@ while condition'
 
 **Dafny:** `return` inside loops is supported. Dafny handles early return paths natively.
 
-**Lean:** `return` inside a `while` loop is **not supported** — Velvet does not support it. The user must restructure to use `break` with an explicit result variable:
+**Lean:** For supported outer-loop shapes, `lsc` lowers an early `return` to a result assignment plus `break`, then returns the result after the loop. The function's postconditions become additional loop invariants for that result variable. Add an explicit `//@ done_with` to the TS loop, since the lowering introduces a break. The transformation does not descend into nested loops; unsupported shapes need an explicit result variable and control-flow restructuring, for example:
 
 ```typescript
 let result = -1;
@@ -1284,7 +1284,7 @@ function runSession(events: Event[]): State {
 }
 ```
 
-Both backends verify this. Lean uses `loom_solve` to discharge all VCs, including the inter-method call. Dafny's Z3 verifier handles it directly.
+Both backends verify this. Lean uses `velvet_vcgen [runSession] with finish` to discharge the VCs, including the inter-method call; `transition` supplies its pure mirror with `finish [Pure.transition]`. Dafny's Z3 verifier handles it directly.
 
 **Example 2: Packet processing (discriminated union with data)**
 
