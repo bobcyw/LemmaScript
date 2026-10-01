@@ -265,9 +265,10 @@ macro "topo_solve" : tactic => `(tactic| first
 
 set_option maxHeartbeats 16000000 in
 prove_correct topologicalSort by
-  velvet_vcgen [topologicalSort]
-  all_goals expose_names
-  all_goals repeat' apply And.intro
-  all_goals topo_solve
+  velvet_vcgen [topologicalSort] with
+    (expose_names
+     tactic =>
+       repeat' apply And.intro
+       all_goals topo_solve)
 
 end TopoProof

@@ -40,8 +40,7 @@ prove_correct wrapOne by
   velvet_vcgen [wrapOne] with finish [Pure.wrapOne]
 
 prove_correct threeElems by
-  velvet_vcgen [threeElems]
-  all_goals simp [Pure.threeElems]
+  velvet_vcgen [threeElems] with (tactic => simp [Pure.threeElems])
 
 prove_correct append by
   velvet_vcgen [append] with finish [Pure.append]

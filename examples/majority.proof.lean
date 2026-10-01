@@ -7,8 +7,5 @@ prove_correct occOf by
   velvet_vcgen [occOf] with finish
 
 prove_correct majority by
-  velvet_vcgen [majority]
-  all_goals expose_names
-  all_goals try dsimp (zetaDelta := true) only [Named.mk] at *
-  all_goals (try simp only [occOf_zero, occOf_step] at *)
-  all_goals grind (splits := 20)
+  velvet_vcgen [majority] simplifying_assumptions [occOf_zero, occOf_step]
+    with finish (splits := 20)

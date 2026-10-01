@@ -139,35 +139,36 @@ This enables proofs by standard Lean induction over sequences of calls. The Velv
 
 Deterministic extern declarations become opaque Lean functions. Impure externs are Dafny-only and are rejected by the Lean backend, whether selected explicitly with `//@ impure` or inherited from `extern-default: impure`; add `//@ pure` to an individual extern used by a Lean file.
 
-**Proof note:** Since the method body is `return Pure.foo ...`, proofs need `unfold Pure.foo` before `loom_solve` to expose the logic.
+**Proof note:** Since the method body is `return Pure.foo ...`, supply its pure mirror to the discharger: `velvet_vcgen [foo] with finish [Pure.foo]`.
 
 ---
 
 ## 4. User-Written `.proof.lean` File
 
 ```lean
-import «binarySearch.def»
+import «clamp.def»
 
-set_option loom.semantics.termination "total"
-set_option loom.semantics.choice "demonic"
+set_option velvet.semantics.termination "total"
 
-prove_correct binarySearch by
-  loom_solve
+prove_correct clamp by
+  velvet_vcgen [clamp] with finish
 ```
 
-This is the simplest proof — delegate everything to `loom_solve`. When `loom_solve` fails:
+Velvet 2 generates VCs and discharges them in one shared solver state. When some goals need interactive proofs:
 
 1. `lsc check` reports unsolved goals.
 2. The user (or LLM) edits `.proof.lean` to add fallback tactics:
 
 ```lean
 prove_correct binarySearch by
-  loom_solve!
+  velvet_vcgen [binarySearch] with (expose_names; try finish)
   · -- handle remaining goal
     grind
 ```
 
-3. Or the user adds helper lemmas to `.spec.lean` that `loom_solve` can use.
+3. Or the user adds helper lemmas to `.spec.lean` and supplies them to `finish` or to `simplifying_assumptions [helper_zero, helper_step]` before `with` to simplify hypotheses during VC generation.
+
+Keep common processing inside `velvet_vcgen`, including `expose_names`, instead of following it with `all_goals` passes. The `with` clause takes grind-mode tactics; `tactic => ...` embeds a complete ordinary tactic proof when needed. Goal-specific residual proofs can remain afterward.
 
 **Invariants** are part of the method definition (in the `//@ ` annotations), not the proof. If an invariant is missing, the user adds `//@ invariant` to the TS file and regenerates `.def.lean`.
 
@@ -181,20 +182,19 @@ Properties about functions can be proved as standalone Hoare triples in `.proof.
 ```lean
 -- The function has no ensures — just loop invariants
 prove_correct runSession by
-  loom_solve
+  velvet_vcgen [runSession] with finish
 
 -- Property proved separately as a Hoare triple
-open TotalCorrectness DemonicChoice in
+open Std.Internal.Do in
 theorem runSession_timeout_resets (events : Array Event)
     (h1 : events.size > 0) (h2 : lastEvent events = .timeout) :
-    triple (events.size > 0 ∧ lastEvent events = .timeout)
-           (runSession events)
-           (fun res => res = State.idle) := by
-  unfold runSession
-  loom_solve
+    Triple (runSession events)
+           (events.size > 0 ∧ lastEvent events = .timeout)
+           (fun res => res = State.idle) False := by
+  velvet_vcgen [runSession] with finish
 ```
 
-The pattern: `unfold` the method to expose the body, then `loom_solve` to discharge the VCs.
+Supply the method in the `velvet_vcgen` argument list and discharge its VCs with `with finish`.
 
 ---
 

@@ -50,9 +50,7 @@ theorem countOn_bounds (xs : Array Bool) :
 end PermProof
 
 prove_correct countOn by
-  velvet_vcgen [countOn] with try finish
-  all_goals expose_names
-  all_goals first | exact (PermProof.countOn_bounds xs).1 | exact (PermProof.countOn_bounds xs).2
+  velvet_vcgen [countOn] with (expose_names; have h := PermProof.countOn_bounds xs; try finish)
 
 prove_correct permRefl by
   velvet_vcgen [permRefl] with finish [Pure.permRefl]
@@ -67,9 +65,6 @@ prove_correct permConcatComm by
 -- of `true` (countOn_eq_count), and `List.Perm.count_eq` makes any count equal
 -- across permutations.
 prove_correct countOnPerm by
-  velvet_vcgen [countOnPerm, Pure.countOnPerm]
-  all_goals expose_names
-  all_goals try simp only [Pure.countOnPerm] at *
-  all_goals try grind
+  velvet_vcgen [countOnPerm, Pure.countOnPerm] with expose_names
   rw [PermProof.countOn_eq_count, PermProof.countOn_eq_count]
   exact_mod_cast require_1.count_eq true
