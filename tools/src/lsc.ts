@@ -5,7 +5,7 @@
  * Pipeline: extract → resolve → narrow → transform → peephole → emit
  */
 
-import { Project, ScriptTarget } from "ts-morph";
+import { Project, ScriptTarget, type SourceFile } from "ts-morph";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { execFileSync } from "child_process";
 import { createRequire } from "module";
@@ -224,6 +224,29 @@ function effectiveOptions(
   return { options, configFile: loaded.configFile };
 }
 
+/** Imported contracts must retain the string model used by their source files. */
+function stringModelValidator(source: SourceFile, options: LscOptions, configPath?: string): (source: SourceFile) => void {
+  const seen = new Set<SourceFile>();
+  return start => {
+    const pending = [start];
+    while (pending.length > 0) {
+      const dependency = pending.pop()!;
+      if (seen.has(dependency)) continue;
+      seen.add(dependency);
+      pending.push(...dependency.getReferencedSourceFiles());
+      // Declaration files describe host APIs; follow re-exports through them,
+      // but compare models only for source files that can carry verified code.
+      if (dependency === source || dependency.isDeclarationFile()) continue;
+      const { options: imported } = effectiveOptions(dependency.getFilePath(), dependency.getFullText(), configPath);
+      if (imported["string-semantics"] !== options["string-semantics"]) {
+        throw new Error(`${source.getFilePath()}: string-semantics=${options["string-semantics"]} differs from `
+          + `${dependency.getFilePath()} (string-semantics=${imported["string-semantics"]}); `
+          + "use the same string model across source dependencies");
+      }
+    }
+  };
+}
+
 /** `lsc config [file.ts]` — report discovery, effective values, and routing. */
 function runConfig(filePath: string | undefined, configPath?: string): void {
   if (!filePath) {
@@ -336,8 +359,13 @@ function runFile(
   const leanModuleDirective = fullText.match(/\/\/@ lean-module ([A-Za-z0-9_.\-]+)/);
   const leanModuleOverride = leanModuleDirective ? leanModuleDirective[1] : undefined;
 
+  // Validate the actual dependency graph, not unrelated files in the tsconfig.
+  // Library selection may differ; only the string model changes contract meaning.
+  const validateDependency = stringModelValidator(sourceFile, options, configPath);
+  validateDependency(sourceFile);
+
   // Extract: ts-morph → Raw IR
-  const raw = extractModule(sourceFile, options);
+  const raw = extractModule(sourceFile, options, validateDependency);
 
   if (cmd === "extract") {
     console.log(JSON.stringify(raw, null, 2));
@@ -434,6 +462,13 @@ function runFile(
   }
 
   // ── Lean backend ──────────────────────────────────────────
+  // Dafny-only profile: Lean's `String` is a sequence of Unicode scalars and
+  // LemmaScript has no UTF-16 encoding for it (DESIGN_STRINGS.md §4). Refuse
+  // rather than emit scalar Lean for a code-unit claim.
+  if (options["string-semantics"] === "javascript-utf16") {
+    console.error('ERROR: "string-semantics": "javascript-utf16" is not available for --backend=lean; use --backend=dafny or select "unicode-scalar" in lemmascript.json or a //@ option directive.');
+    process.exit(1);
+  }
   const leanBase = leanModuleOverride ?? base;
   const specPath = path.join(dir, `${leanBase}.spec.lean`);
   const specImport = existsSync(specPath) ? `«${leanBase}.spec»` : undefined;

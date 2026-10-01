@@ -100,6 +100,7 @@ The Dafny emitter auto-injects helper functions when needed. Each is emitted at 
 | Helper | When | Purpose |
 |--------|------|---------|
 | `SeqIndexOf` | `arr.indexOf(x)` | First-index search (`-1` if absent) |
+| `SeqFilter` / `SeqAll` / `SeqFoldLeft` | `filter` / `every` / `reduce` with `dafny-library: local` | Local recursive collection helpers (no Dafny standard-library dependency) |
 | `SeqFindIndex` | `arr.findIndex(f)` | Predicate first-index search |
 | `SeqFind` | `arr.find(f)` | Predicate first-match search |
 | `SeqFindLast` | `arr.findLast(f)` | Predicate last-match search |
@@ -118,6 +119,27 @@ The Dafny emitter auto-injects helper functions when needed. Each is emitted at 
 | `StringTrim` | `s.trim()` / `s.trimEnd()` / `s.trimStart()` | Trim (also provides `StringTrimRight` / `StringTrimLeft`); strips the full ECMAScript whitespace set via `IsJSWhitespace`, not just `' '` |
 | `StringToLower` / `StringToUpper` | `s.toLowerCase()` / `s.toUpperCase()` | Case folding |
 
+**String semantics.** Set `string-semantics` in `lemmascript.json` or a file's
+`//@ option` directive (SPEC.md §7.6). Proofs depend on the selected model:
+
+| Setting | Meaning |
+|---|---|
+| `"unicode-scalar"` (default) | Strings are Unicode scalar sequences. `.length`, indexing, `slice`, `charCodeAt`, and `indexOf` can differ from JavaScript for characters such as emoji. Unpaired surrogates are unsupported. |
+| `"javascript-utf16"` | Strings are UTF-16 code-unit sequences. `.length`, indexing, `slice`, and `charCodeAt` use JavaScript code-unit positions and values; indexing and slicing retain the fragment's bounds obligations. Requires `"dafny-library": "local"`. |
+
+Both profiles support ASCII-only case conversion. `String.fromCharCode` requires
+a Unicode scalar in the default profile, or `0 <= n < 0x10000` in UTF-16 mode.
+Generated files record every UTF-16 selection in their header;
+the default profile adds no `string-semantics` setting.
+
+**Collection helpers.** `dafny-library` selects standard-library helpers (`stdlib`,
+the default) or generated helpers (`local`) for `filter`, `every`, and `reduce`.
+Unicode-scalar mode supports either; UTF-16 mode requires an explicit `local` setting.
+
+This choice does not change string semantics or control handwritten proof imports.
+Those imports must still be compatible with the selected string model (see §5).
+Both settings support file directives; see [examples/utf16.ts](examples/utf16.ts).
+
 ---
 
 ## 5. Verification
@@ -130,5 +152,15 @@ The Dafny emitter auto-injects helper functions when needed. Each is emitted at 
 
 Standard libraries are auto-detected: if `foo.dfy` contains `import Std.`, the `--standard-libraries` flag is added.
 
-The shared `--time-limit=<seconds>` flag (SPEC.md §7) maps to Dafny's `--verification-time-limit`; `--extra-flags=<string>` is forwarded verbatim to `dafny verify`.
+`lsc` verifies each `.dfy` using the string semantics recorded in its generated
+header, even if the project configuration has changed. A file without a
+`string-semantics` header uses `unicode-scalar`.
 
+Proof additions must preserve the generated file's string model. Conflicting or
+duplicate model settings are errors, including when verification is skipped.
+
+Proofs using `javascript-utf16` cannot import Dafny's precompiled standard library
+(`Std.*`); verification reports an error if they do. Proofs using `unicode-scalar`
+can use that library.
+
+The shared `--time-limit=<seconds>` flag (SPEC.md §7) maps to Dafny's `--verification-time-limit`; `--extra-flags=<string>` is forwarded verbatim to `dafny verify`.

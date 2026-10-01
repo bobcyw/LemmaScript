@@ -59,6 +59,8 @@ let _namespaceFunctions = new Map<Node, string>();
 let _inFunctionExtraction = false;
 /** Effective options for the current extraction. Reset at extractModule entry. */
 let _extractOptions: LscOptions = DEFAULT_OPTIONS;
+/** The CLI validates source options before copying a cross-file contract. */
+let _validateDependency: (source: SourceFile) => void = () => {};
 /** Counter for synthetic names used by let-statement array destructuring
  *  when the initializer isn't a bare variable (single-eval temp). */
 let _destrCounter = 0;
@@ -124,6 +126,8 @@ function detectCrossFileExtern(
   if (externalDecl.getSourceFile().getFilePath().endsWith(".d.ts")) return null;
   const sig = callee.getType().getCallSignatures()[0];
   if (!sig) return null;
+  // Includes global declarations selected by TypeScript without an import edge.
+  _validateDependency(externalDecl.getSourceFile());
   // Generic type parameters (e.g. `step<S, A>`). ts-morph reports param/return
   // types in the callee's own type-parameter namespace, so these names match
   // what `params`/`returnType` reference — declare them on the emitted axiom.
@@ -384,23 +388,23 @@ function extractExpr(node: Expression): RawExpr {
     // Always push the head, even when empty: a leading string literal anchors the
     // whole chain as string-typed so each interpolated value is stringified (not
     // added numerically — `${a}${b}` is concatenation, not `a + b`).
-    parts.push({ kind: "str", value: node.getHead().getLiteralText() });
+    parts.push(stringLiteral(node.getHead().getLiteralText(), node));
     for (const span of node.getTemplateSpans()) {
       parts.push(extractExpr(span.getExpression()));
       const text = span.getLiteral().getLiteralText();
-      if (text) parts.push({ kind: "str", value: text });
+      if (text) parts.push(stringLiteral(text, span));
     }
     return parts.reduce((left, right) => ({ kind: "binop", op: "+", left, right }));
   }
 
   // No-substitution template literal: `hello` → "hello"
   if (Node.isNoSubstitutionTemplateLiteral(node)) {
-    return { kind: "str", value: node.getLiteralText() };
+    return stringLiteral(node.getLiteralText(), node);
   }
 
   // String literal
   if (Node.isStringLiteral(node)) {
-    return { kind: "str", value: node.getLiteralValue() };
+    return stringLiteral(node.getLiteralValue(), node);
   }
 
   // Boolean literals: true, false
@@ -830,6 +834,40 @@ function hasExternModeAnnotation(node: Node, keyword: "pure" | "impure", parentS
   const statement = parentStmt ?? enclosingVariableStatement(node);
   return !!statement && statement.getLeadingCommentRanges()
     .some(r => r.getText().trim() === `//@ ${keyword}`);
+}
+
+/** The first lone surrogate code unit in `value`, or -1. */
+function findLoneSurrogate(value: string): number {
+  for (let i = 0; i < value.length; i++) {
+    const unit = value.charCodeAt(i);
+    if (unit >= 0xD800 && unit <= 0xDBFF) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xDC00 && next <= 0xDFFF) { i++; continue; }
+      return unit;
+    }
+    if (unit >= 0xDC00 && unit <= 0xDFFF) return unit;
+  }
+  return -1;
+}
+
+/** A source string literal, admitted only if the selected string profile can
+ *  represent it (DESIGN_STRINGS.md §3). Under `unicode-scalar` a lone surrogate
+ *  has no Dafny value — and Node's UTF-8 writer would silently replace it on
+ *  the way out — so it is refused here with the source line instead. */
+function stringLiteral(value: string, node: Node): RawExpr {
+  if (_extractOptions["string-semantics"] === "unicode-scalar") {
+    const lone = findLoneSurrogate(value);
+    if (lone >= 0) {
+      const file = node.getSourceFile();
+      const { line } = file.getLineAndColumnAtPos(node.getStart());
+      throw new Error(
+        `${file.getFilePath()}:${line}: string literal contains an unpaired surrogate ` +
+        `U+${lone.toString(16).toUpperCase()}, which "string-semantics": "unicode-scalar" cannot ` +
+        `represent; select string-semantics=javascript-utf16 and dafny-library=local in lemmascript.json or //@ option directives`,
+      );
+    }
+  }
+  return { kind: "str", value };
 }
 
 function externIsImpure(node: Node, name: string, parentStmt?: Node): boolean {
@@ -2083,12 +2121,17 @@ function extractFunctionInner(fn: FunctionDeclaration, parentAnnotations?: Annot
 
 // ── Module extraction ────────────────────────────────────────
 
-export function extractModule(sourceFile: SourceFile, options: LscOptions = DEFAULT_OPTIONS): RawModule {
+export function extractModule(sourceFile: SourceFile, options: LscOptions = DEFAULT_OPTIONS,
+  validateDependency: (source: SourceFile) => void = () => {}): RawModule {
   _extractOptions = options;
+
   const functionDeclarations = sourceFunctions(sourceFile);
   _namespaceFunctions = new Map(functionDeclarations
     .filter(fn => Node.isModuleBlock(fn.getParent()))
     .flatMap(fn => [fn, ...fn.getOverloads()].map(decl => [decl, fn.getName()!] as const)));
+
+  _validateDependency = validateDependency;
+
   // Seed the fresh-name check (names.ts) before anything mints: every
   // Identifier token in the module, a deliberate over-approximation.
   setUserNames(new Set(sourceFile.getDescendantsOfKind(SyntaxKind.Identifier).map(i => i.getText())));
