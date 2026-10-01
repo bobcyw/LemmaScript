@@ -452,6 +452,10 @@ The same coercion applies to non-bool conditions in `if`/`while`/`?:` positions:
 
 ### 3.2 Special Forms
 
+The collection rows show the default `dafny-library: stdlib` setting.
+With `local`, `SeqFilter` and `SeqAll` replace the corresponding
+`Std.Collections.Seq` helpers (§7.6).
+
 | Spec / TS | Lean | Dafny |
 |-----------|------|-------|
 | `arr.length` | `arr.size` | `\|arr\|` |
@@ -681,6 +685,9 @@ The transform uses two strategies for translating `receiver.method(args)`:
 | `s.has(x)` | `setHas` | `s.contains x` | `(x in s)` |
 | `s.add(x)` | `setAdd` | `s.insert x` | `(s + {x})` |
 | `s.delete(x)` | `setDelete` | `s.erase x` | `(s - {x})` |
+
+Dafny collection entries use the default `stdlib` setting; `local` uses
+`SeqFilter` and `SeqAll` instead (§7.6).
 
 The transform checks helper-function methods first, then dot-notation methods. If neither matches, it errors.
 
@@ -1020,6 +1027,11 @@ The spec body is purely additive — `regen` three-way-merges and preserves user
 | `<T>` / `<T extends U>` (unbounded, or union/intersection bound) | `T` kept as type param (bound dropped) | `T` kept as type param (bound dropped) |
 | `A \| B` (union param) | field intersection type | field intersection type |
 | Anything else | Pass through | Pass through |
+
+For the Dafny backend, `string` uses Unicode-scalar semantics by default.
+To use JavaScript's UTF-16 code-unit model, select
+`"string-semantics": "javascript-utf16"` and `"dafny-library": "local"`
+(§7.6). See SPEC_DAFNY.md §4 for the behavior and limitations of each model.
 
 `lsc` reads parameter and variable types from ts-morph. Primitive types are mapped per the table. User-defined types (like `State`, `Event`) are passed through by name — the corresponding backend type is generated from the TS type declaration.
 
@@ -1378,13 +1390,38 @@ it; absent means current behavior. Unknown keys and bad values are errors.
 | `extern-default` | `pure` \| `impure` | `pure` | yes |
 | `safe-slice` | boolean | `false` | yes |
 | `proof-dir` | relative path | source directory | no (Dafny only) |
+| `string-semantics` | `unicode-scalar` \| `javascript-utf16` | `unicode-scalar` | yes (Dafny only) |
+| `dafny-library` | `stdlib` \| `local` | `stdlib` | yes (Dafny only) |
 
 Eligible settings use `//@ option <key> <value>` before the first source
 statement. File values override project values; duplicates are errors.
 `proof-dir` mirrors the source's config-relative path under its configured root
-(see SPEC_DAFNY.md §1). `lsc config foo.ts` prints the config path, effective
+(see SPEC_DAFNY.md §1). `string-semantics` selects which model of JavaScript strings a
+Dafny proof is made under (SPEC_DAFNY.md §4). A source file and the source files it
+imports, directly or indirectly, must use the same `string-semantics` value after
+project settings and file overrides are combined. Declaration files (`.d.ts`)
+are excluded from this comparison. If values differ, `lsc` reports both files
+and stops before generating Dafny.
+`dafny-library` selects standard-library
+or generated local helpers for `filter`, `every`, and `reduce`. UTF-16 requires an explicit
+`"dafny-library": "local"`; omitting it keeps the `stdlib` default and reports an incompatibility.
+Unicode-scalar strings support either library choice. `lsc config foo.ts` prints the config path, effective
 options, and resolved Dafny artifact directory; `lsc config` reports defaults
 from the current directory. `backend` is deliberately not a config option.
+
+To use JavaScript UTF-16 string semantics in a standalone file, add these
+directives before its first statement. These overrides are not needed for the
+default `unicode-scalar` mode:
+
+```typescript
+//@ backend dafny
+//@ option string-semantics javascript-utf16
+//@ option dafny-library local
+```
+
+See [examples/utf16.ts](examples/utf16.ts) and its Dafny proof. Compatibility is checked
+after project values and file directives are merged. Collection libraries may differ
+between files; unlike the string model, they do not change the meaning of contracts.
 
 ---
 

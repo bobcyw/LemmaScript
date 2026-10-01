@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
-import { parseFileOptions } from "../src/config.ts";
+import { parseFileOptions, resolveOptions, validateOptions } from "../src/config.ts";
 
 test("parses a genuine leading option comment", () => {
   assert.deepEqual(
@@ -145,7 +145,7 @@ for (const [directive, message] of [
   ["option", "expected //@ option <key> <value>"],
   ["option safe-slice", "expected //@ option <key> <value>"],
   ["option safe-slice true extra", "expected //@ option <key> <value>"],
-  ["option missing true", "unknown option 'missing' (known options: extern-default, safe-slice, proof-dir)"],
+  ["option missing true", "unknown option 'missing' (known options: extern-default, safe-slice, proof-dir, string-semantics, dafny-library)"],
   ["option safe-slice yes", "option 'safe-slice' must be true or false"],
   ["option extern-default invalid", "option 'extern-default' must be one of: pure, impure"],
   ["option proof-dir proofs", "option 'proof-dir' is config-only"],
@@ -168,5 +168,65 @@ for (const directives of [
       () => parseFileOptions(directives, "example.ts"),
       { message: "example.ts:2: duplicate option 'safe-slice' (first set on line 1)" },
     );
+  });
+}
+
+test("string-semantics is an enum whose default is today's Unicode-scalar model", () => {
+  assert.equal(resolveOptions({}, "lemmascript.json")["string-semantics"], "unicode-scalar");
+  assert.deepEqual(
+    validateOptions({ "string-semantics": "javascript-utf16" }, "lemmascript.json"),
+    { "string-semantics": "javascript-utf16" },
+  );
+  assert.throws(
+    () => validateOptions({ "string-semantics": "utf16" }, "lemmascript.json"),
+    /must be one of: unicode-scalar, javascript-utf16/,
+  );
+});
+
+test("string and library directives override project defaults before compatibility checks", () => {
+  const file = parseFileOptions("//@ option string-semantics javascript-utf16\n//@ option dafny-library local\n", "example.ts");
+  const options = resolveOptions({ "string-semantics": "unicode-scalar", "dafny-library": "stdlib", ...file }, "example.ts");
+  assert.equal(options["string-semantics"], "javascript-utf16");
+  assert.equal(options["dafny-library"], "local");
+  assert.throws(() => resolveOptions(parseFileOptions("//@ option string-semantics javascript-utf16\n", "example.ts"), "example.ts"),
+    /incompatible/);
+});
+
+test("Dafny library defaults to stdlib and local works with scalar strings", () => {
+  assert.equal(resolveOptions({}, "lemmascript.json")["dafny-library"], "stdlib");
+  const options = resolveOptions(validateOptions({ "dafny-library": "local" }, "lemmascript.json"), "lemmascript.json");
+  assert.equal(options["dafny-library"], "local");
+  assert.equal(options["string-semantics"], "unicode-scalar");
+  assert.ok(Object.isFrozen(options));
+});
+
+for (const library of [undefined, "stdlib"] as const) {
+  test(`UTF-16 rejects ${library === undefined ? "the default" : "explicit"} stdlib choice`, () => {
+    const explicit = library === undefined
+      ? { "string-semantics": "javascript-utf16" }
+      : { "string-semantics": "javascript-utf16", "dafny-library": library };
+    assert.throws(() => resolveOptions(validateOptions(explicit, "lemmascript.json"), "lemmascript.json"),
+      /lemmascript\.json:.*"string-semantics": "javascript-utf16".*"dafny-library": "stdlib".*"local" explicitly/);
+  });
+}
+
+test("UTF-16 requires an explicit local library choice", () => {
+  const explicit = validateOptions({ "string-semantics": "javascript-utf16", "dafny-library": "local" }, "lemmascript.json");
+  assert.equal(resolveOptions(explicit, "lemmascript.json")["dafny-library"], "local");
+});
+
+test("Dafny library accepts only registered values in config and file directives", () => {
+  for (const value of [true, "standard", null]) {
+    assert.throws(() => validateOptions({ "dafny-library": value }, "lemmascript.json"), /must be one of: stdlib, local/);
+  }
+  assert.deepEqual(parseFileOptions("//@ option dafny-library local\n", "example.ts"), { "dafny-library": "local" });
+  assert.throws(() => parseFileOptions("//@ option dafny-library standard\n", "example.ts"), /must be one of: stdlib, local/);
+});
+
+for (const [key, value] of [["string-semantics", "javascript-utf16"], ["dafny-library", "local"]]) {
+  test(`${key} retains duplicate and placement checks`, () => {
+    const directive = `//@ option ${key} ${value}\n`;
+    assert.throws(() => parseFileOptions(directive + directive, "example.ts"), /duplicate option/);
+    assert.throws(() => parseFileOptions("const value = 1;\n" + directive, "example.ts"), /before the first source statement/);
   });
 }
