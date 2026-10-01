@@ -6,7 +6,7 @@ Guidance for AI coding agents working on LemmaScript itself or on projects that 
 
 A verification toolchain for TypeScript. The user writes ordinary TS with `//@ ` annotations. `lsc` generates either:
 - **Dafny** — one `.dfy.gen` (always regeneratable) + one `.dfy` (the source of truth where proof additions accumulate). Diff must be additions-only.
-- **Lean 4 / Velvet / Loom** — four files: `.types.lean` + `.def.lean` are generated; `.spec.lean` + `.proof.lean` are hand-written.
+- **Lean 4 / Velvet 2** — four files: `.types.lean` + `.def.lean` are generated; `.spec.lean` + `.proof.lean` are hand-written.
 
 Whatever you do, the TS file is the source of truth for *the program*. The hand-written verification files are the source of truth for *the proof*. Don't conflate them.
 
@@ -107,7 +107,16 @@ import opened Std.Arithmetic.DivMod     // LemmaMulStrictInequality(x,y,z): x<y 
 
 ## Lean verification workflow
 
-`lake build` runs the full chain. `loom_solve` is the default tactic for discharging Velvet VCs, but **it does not automatically apply step lemmas to recursive helpers** — for those, you need an explicit chain (e.g., `loomAbstractionSimp` + the step lemma name) rather than a bare `loom_solve`.
+Use the sibling `../velvet` checkout on **`lemma2`** and the Lean version pinned in `lean-toolchain`. The older `lemma` branch targets Velvet 1. Velvet 2 does not need a Loom checkout or external SMT solver downloads; see [README.md](README.md#setup) for clone and checkout commands.
+
+`lake build` runs the full chain. With Velvet 2, start with `velvet_vcgen [methodName] with finish`. Keep common VC processing inside `velvet_vcgen` so the discharger can reuse its shared solver state:
+
+```lean
+velvet_vcgen [methodName] simplifying_assumptions [helper_zero, helper_step]
+  with (expose_names; try finish)
+```
+
+Omit `simplifying_assumptions` when no hypothesis rewriting is needed; its list contains rewrite lemmas. Supply recursive helpers' zero/step lemmas explicitly rather than unfolding their definitions indiscriminately. Put `expose_names` inside `with`, not in a following `all_goals` pass. The `with` clause accepts grind-mode tactics (`finish`, `have`, `apply`, etc.); use `tactic => ...` for a complete ordinary tactic proof such as `simp` or `omega`. Leave only goal-specific residual proofs after `velvet_vcgen`.
 
 `.spec.lean` is for ghost definitions and helper lemmas; `.proof.lean` is for `prove_correct` plus the tactic script. Keep them separate; don't push everything into `.proof.lean`.
 

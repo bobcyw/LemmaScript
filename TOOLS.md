@@ -132,8 +132,11 @@ TS source (.ts)
 
 ### Commands (`lean-commands.ts`)
 
-- `lsc gen foo.ts` — generate `.types.lean` + `.def.lean`
-- `lsc check foo.ts` — gen + `lake build`
+- `lsc gen --backend=lean foo.ts` — generate `.types.lean` + `.def.lean`
+- `lsc check --backend=lean foo.ts` — gen + `lake build`
+
+The Lean workspace uses Velvet 2 from the sibling `../velvet` checkout on the
+`lemma2` branch and the version in `lean-toolchain`. See [setup](README.md#setup).
 
 ## Dafny Backend
 
