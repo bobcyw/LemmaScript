@@ -42,6 +42,8 @@ trap 'rm -rf "$fixture_dir"' EXIT
 cp tools/fixtures/deterministic-extern-equality.ts "$fixture_dir/deterministic.ts"
 cp tools/fixtures/impure-extern-equality.ts "$fixture_dir/impure.ts"
 cp examples/safeSlice.ts "$fixture_dir/legacy-safe-slice.ts"
+cp -R tools/fixtures/utf16-project "$fixture_dir/utf16-project"
+cp tools/fixtures/unpaired-surrogate.ts "$fixture_dir/unpaired.ts"
 
 npx tsx tools/src/lsc.ts gen --backend=dafny "$fixture_dir/impure.ts"
 if ! grep -Fq 'method {:axiom} rollDie' "$fixture_dir/impure.dfy.gen"; then
@@ -172,3 +174,108 @@ expect_failure \
   "proof-dir silently bypassed a sibling hand-written proof" \
   npx tsx tools/src/lsc.ts gen --backend=dafny "$config_fixture/src/legacy.ts"
 expect_absent "$config_fixture/proofs/src/legacy.dfy"
+
+# ── String profile and collection library ─────────────────────────────────
+# The ordinary example selects both options in source, without a JSON config.
+cp examples/utf16.ts "$fixture_dir/utf16-example.ts"
+npx tsx tools/src/lsc.ts check --backend=dafny --time-limit=10 "$fixture_dir/utf16-example.ts"
+grep -Fq '// lsc options: string-semantics=javascript-utf16' "$fixture_dir/utf16-example.dfy.gen"
+
+# Under "string-semantics": "javascript-utf16" a JavaScript string is a UTF-16
+# code-unit sequence: astral characters occupy two Dafny chars and lone
+# surrogates stay representable. The header token is what dafnyVerify maps to
+# --unicode-char:false --allow-deprecation.
+utf16="$fixture_dir/utf16-project/src/utf16.ts"
+utf16_gen="$fixture_dir/utf16-project/src/utf16.dfy.gen"
+if ! npx tsx tools/src/lsc.ts config "$utf16" | grep -Fq '"string-semantics": "javascript-utf16"'; then
+  echo "ERROR: lsc config did not report string-semantics=javascript-utf16"
+  exit 1
+fi
+if ! npx tsx tools/src/lsc.ts config "$utf16" | grep -Fq '"dafny-library": "local"'; then
+  echo "ERROR: lsc config did not report the explicit local library choice"
+  exit 1
+fi
+npx tsx tools/src/lsc.ts check --backend=dafny --time-limit=10 "$utf16"
+grep -Fq '// lsc options: string-semantics=javascript-utf16' "$utf16_gen"
+grep -Fq '"\uD83D\uDE00"' "$utf16_gen"
+grep -Fq '"\uD83D"' "$utf16_gen"
+if grep -Fq 'Std.Collections' "$utf16_gen"; then
+  echo "ERROR: javascript-utf16 emitted a Dafny standard-library call"
+  exit 1
+fi
+
+# The library has a fixed stdlib default; UTF-16 never silently changes it.
+cp -R tools/fixtures/config-incompatible-strings "$fixture_dir/incompatible-strings"
+incompatible="$fixture_dir/incompatible-strings/source.ts"
+expect_failure "UTF-16 silently changed the default library" \
+  npx tsx tools/src/lsc.ts gen --backend=dafny "$incompatible"
+expect_failure "UTF-16 accepted an explicit stdlib choice" \
+  npx tsx tools/src/lsc.ts gen --backend=dafny \
+    --config="$fixture_dir/incompatible-strings/stdlib.json" "$incompatible"
+expect_absent "$fixture_dir/incompatible-strings/source.dfy.gen"
+expect_absent "$fixture_dir/incompatible-strings/source.dfy"
+
+# Prove the same collection contracts with default stdlib, scalar/local, and
+# UTF-16/local. All generated artifacts stay in the temporary fixture directory.
+cp -R tools/fixtures/collection-library-project "$fixture_dir/local-collections"
+cp tools/fixtures/collection-library-project/collections.ts "$fixture_dir/standard-collections.ts"
+cp tools/fixtures/collection-library-project/collections.ts "$fixture_dir/utf16-project/collections.ts"
+npx tsx tools/src/lsc.ts gen --backend=dafny "$fixture_dir/standard-collections.ts"
+# Standard Filter is opaque. Add proof steps that expose its definition and
+# unfold the three input elements plus the empty tail; check enforces additions-only.
+node --input-type=module - "$fixture_dir/standard-collections.dfy" <<'JS'
+import { readFileSync, writeFileSync } from "node:fs";
+const path = process.argv[2];
+let proof = readFileSync(path, "utf8");
+for (const [name, type, expected] of [
+  ["positiveNumbers", "int", "[1, 2]"],
+  ["nonemptyStrings", "string", '["a", "bc"]'],
+]) {
+  const start = new RegExp(`lemma ${name}_ensures\\(\\)[\\s\\S]*?\\{\\n`);
+  if (!start.test(proof)) throw new Error(`Missing proof body for ${name}`);
+  proof = proof.replace(start, "$&  reveal Std.Collections.Seq.Filter();\n"
+    + `  assert {:fuel Std.Collections.Seq.Filter<${type}>, 4, 5} ${name}() == ${expected};\n`);
+}
+writeFileSync(path, proof);
+JS
+npx tsx tools/src/lsc.ts check --backend=dafny --time-limit=10 "$fixture_dir/standard-collections.ts"
+for helper in Filter All FoldLeft; do
+  grep -Fq "Std.Collections.Seq.$helper(" "$fixture_dir/standard-collections.dfy.gen"
+done
+for source in "$fixture_dir/local-collections/collections.ts" "$fixture_dir/utf16-project/collections.ts"; do
+  npx tsx tools/src/lsc.ts check --backend=dafny --time-limit=10 "$source"
+  generated="${source%.ts}.dfy.gen"
+  if grep -Fq 'Std.' "$generated"; then
+    echo "ERROR: dafny-library=local emitted a standard-library reference"
+    exit 1
+  fi
+  for helper in SeqFilter SeqAll SeqFoldLeft; do grep -Fq "$helper<" "$generated"; done
+done
+if grep -Fq '// lsc options:' "$fixture_dir/local-collections/collections.dfy.gen"; then
+  echo "ERROR: selecting local helpers changed scalar string semantics"
+  exit 1
+fi
+grep -Fq '// lsc options: string-semantics=javascript-utf16' "$fixture_dir/utf16-project/collections.dfy.gen"
+
+expect_failure \
+  "Dafny standard library was combined with javascript-utf16 strings" \
+  npx tsx -e 'import { dafnyVerify } from "./tools/src/dafny-commands.ts"; process.exit(dafnyVerify("tools/fixtures/string-with-standard-library.dfy", ".") ? 0 : 1)'
+
+expect_failure \
+  "javascript-utf16 was accepted by the Lean backend" \
+  npx tsx tools/src/lsc.ts gen --backend=lean "$fixture_dir/utf16-project/src/lean-rejected.ts"
+expect_absent "$fixture_dir/utf16-project/src/lean-rejected.def.lean"
+
+# The default profile cannot represent a lone surrogate: refused at extraction
+# with the source line, not silently replaced by the UTF-8 file writer.
+expect_failure \
+  "unicode-scalar accepted an unpaired surrogate literal" \
+  npx tsx tools/src/lsc.ts gen --backend=dafny "$fixture_dir/unpaired.ts"
+expect_absent "$fixture_dir/unpaired.dfy.gen"
+
+# The default profile leaves generated text exactly as before: no header token.
+npx tsx tools/src/lsc.ts gen --backend=dafny "$fixture_dir/legacy-safe-slice.ts"
+if grep -Fq '// lsc options:' "$fixture_dir/legacy-safe-slice.dfy.gen"; then
+  echo "ERROR: unicode-scalar stamped an options header"
+  exit 1
+fi

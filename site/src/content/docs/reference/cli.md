@@ -94,10 +94,27 @@ at the current directory. Use `--config=<path>` to pin a particular file.
 ```json
 {
   "extern-default": "impure",
+  "string-semantics": "unicode-scalar",
+  "dafny-library": "stdlib",
   "safe-slice": true,
   "proof-dir": "proofs"
 }
 ```
+
+`dafny-library` selects `stdlib` (default) or generated `local` helpers for collection
+operations. Enabling `"string-semantics": "javascript-utf16"` requires explicitly setting
+`"dafny-library": "local"`; an omitted or explicit `stdlib` choice is an error.
+
+A file can override both project settings before its first statement:
+
+```typescript
+//@ backend dafny
+//@ option string-semantics javascript-utf16
+//@ option dafny-library local
+```
+
+Source dependencies must use the same effective string model. `lsc config file.ts`
+shows the settings after file overrides; `lsc check file.ts` also checks dependencies.
 
 ### `lsc claimcheck`
 
