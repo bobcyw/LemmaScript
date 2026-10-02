@@ -74,7 +74,15 @@ export function dafnyCheckDiff(genPath: string, dfyPath: string): boolean {
     else if (inHunk && line.startsWith("-")) deletions.push(line);
   }
   if (deletions.length > 0) {
-    console.error(`WARNING: ${path.basename(dfyPath)} has modifications to generated lines (not additions-only):`);
+    // Deliberately not phrased as a verification result. A stale `.dfy` (TS body
+    // edited without regenerating) lands here too, and reading this as "the
+    // verifier rejected my change" would make a mutation test look like it fired
+    // when the verifier never ran.
+    console.error(`ERROR: ${path.basename(dfyPath)} does not match ${path.basename(genPath)} — generated lines were`);
+    console.error("modified, or the proof file is stale. This is NOT a verification verdict: the verifier has not run.");
+    console.error("  - Changed the .ts? Use `lsc regen` — it merges and keeps your proof additions.");
+    console.error("  - Edited generated text by hand? Undo it: generated lines belong to the tool, not the proof.");
+    console.error("Offending lines:");
     for (const d of deletions.slice(0, 5)) console.error("  " + d);
     return false;
   }
@@ -193,7 +201,7 @@ export function dafnyRegen(genPath: string, dfyPath: string, basePath: string, t
 
   // 6. Check gen invariant (unconditional)
   if (!dafnyCheckDiff(genPath, dfyPath)) {
-    console.error(`FAILED: ${path.basename(dfyPath)} has modifications to generated lines.`);
+    console.error(`FAILED: ${path.basename(dfyPath)} still modifies generated lines after merging — fix those lines in the proof file before verifying.`);
     process.exit(1);
   }
 

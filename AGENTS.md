@@ -56,6 +56,8 @@ npx lsc regen --backend=dafny foo.ts
 
 Do **not** `rm foo.dfy foo.dfy.gen && npx lsc gen ...` — that drops every proof addition you (or the previous agent) made in `foo.dfy`. `regen` does a three-way merge against the old `.dfy.gen` and preserves additions. On conflict it restores the original `foo.dfy` and writes the merged result to `foo.dfy.merged` for manual inspection.
 
+**A stale `.dfy` is not a failed proof.** Edit the TS and run `lsc check` without regenerating first, and the additions-only gate fails *before* the verifier starts — the message says "This is NOT a verification verdict: the verifier has not run." Do not read that red as "the verifier rejected my change": in a mutation test it looks like the check fired when it never ran. Either run `lsc regen`, or, when you deliberately want a from-scratch generation, remove both companions first (`rm foo.dfy foo.dfy.gen`) so the `.dfy` is rebuilt from the new `.dfy.gen`.
+
 ### When regen needs merge-state recovery
 
 `regen` anchors its three-way merge on `foo.dfy.base` if that file exists, otherwise on the previous `.dfy.gen`. When a merge is clean but verification fails, `regen` advances `foo.dfy.base` to the newly generated `.dfy.gen` before reporting failure. That anchor is intentional: the proof file already contains the new generated content, so the next regen can preserve proof additions while merging from the generation it actually contains.
