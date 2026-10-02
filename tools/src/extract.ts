@@ -2202,6 +2202,13 @@ export function extractModule(sourceFile: SourceFile, options: LscOptions = DEFA
 
   // Extract module-level const declarations
   const constants: RawConst[] = [];
+  // Consts whose initializer is outside the modelled fragment. A module-level
+  // singleton (`export const svc = new Svc()`) is not something a proof can use,
+  // but failing the whole file for it makes brownfield use impossible: the
+  // annotated function may have nothing to do with it. Hold the failure here and
+  // decide once we know which files are in brownfield mode and what is
+  // referenced — see the filter below.
+  const unsupportedConsts: { name: string; line: number; reason: string }[] = [];
   for (const stmt of sourceFile.getStatements()) {
     if (Node.isVariableStatement(stmt)) {
       if (hasLeadingDirective(stmt, "skip")) continue;
@@ -2226,9 +2233,7 @@ export function extractModule(sourceFile: SourceFile, options: LscOptions = DEFA
               });
             } catch (e) {
               const reason = e instanceof Error ? e.message : String(e);
-              throw new Error(
-                `Failed to extract const '${decl.getName()}' at ${sourceFile.getBaseName()}:${decl.getStartLineNumber()}: ${reason}`,
-              );
+              unsupportedConsts.push({ name: decl.getName(), line: decl.getStartLineNumber(), reason });
             }
           }
         }
@@ -2556,6 +2561,21 @@ export function extractModule(sourceFile: SourceFile, options: LscOptions = DEFA
       }
     }
     constants.splice(0, constants.length, ...constants.filter(c => referencedNames.has(c.name)));
+    // In brownfield mode a const only matters when a `//@ verify` function
+    // refers to it. An unrelated module-level singleton stays unmodelled — say
+    // so on stderr, but do not fail the file (dropping it silently would be
+    // worse: the reader would never learn part of the module was left out).
+    for (const c of unsupportedConsts) {
+      if (referencedNames.has(c.name)) {
+        throw new Error(
+          `Failed to extract const '${c.name}' at ${sourceFile.getBaseName()}:${c.line}: ${c.reason}`,
+        );
+      }
+      console.error(
+        `Note: skipped module-level const '${c.name}' at ${sourceFile.getBaseName()}:${c.line} (${c.reason}); ` +
+        "no //@ verify function refers to it.",
+      );
+    }
     // Filter types to only those referenced by verified functions (transitive)
     const neededTypes = new Set<string>();
     function markType(name: string) {
@@ -2579,6 +2599,16 @@ export function extractModule(sourceFile: SourceFile, options: LscOptions = DEFA
       if (base !== name && /^[A-Za-z_]\w*$/.test(base)) markType(base);
     }
     typeDecls.splice(0, typeDecls.length, ...typeDecls.filter(d => neededTypes.has(d.name) || declaredNames.has(d.name)));
+  }
+
+  // Every function in the file is being extracted, so an unmodelled const is
+  // part of the program under verification and stays fatal — with the same
+  // message it always had.
+  if (!hasVerifyDirective && unsupportedConsts.length > 0) {
+    const c = unsupportedConsts[0];
+    throw new Error(
+      `Failed to extract const '${c.name}' at ${sourceFile.getBaseName()}:${c.line}: ${c.reason}`,
+    );
   }
 
   // Resolve imported types: extract types referenced in function signatures but not in this file
