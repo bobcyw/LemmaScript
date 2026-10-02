@@ -11,13 +11,30 @@ export type Expr = RawExpr;
 // ── Tokenizer ────────────────────────────────────────────────
 
 type Token =
-  | { type: "num"; value: number }
-  | { type: "bigint"; value: string }
-  | { type: "str"; value: string }
-  | { type: "ident"; value: string }
-  | { type: "op"; value: string }
-  | { type: "punc"; value: string }
-  | { type: "result"; value: undefined };
+  | { type: "num"; value: number; pos: number }
+  | { type: "bigint"; value: string; pos: number }
+  | { type: "str"; value: string; pos: number }
+  | { type: "ident"; value: string; pos: number }
+  | { type: "op"; value: string; pos: number }
+  | { type: "punc"; value: string; pos: number }
+  | { type: "result"; value: undefined; pos: number };
+
+/** How a token is written back to the reader. Errors name the token the way it
+ *  appears in the annotation, never as an internal record. */
+function tokenText(t: Token): string {
+  return t.type === "result" ? "\\result" : String(t.value);
+}
+
+/** An annotation is a single line of prose, so "offset 27" plus the full text is
+ *  enough to point at it; a raw `{"type":"op","value":"!"}` is not. */
+function unsupportedToken(t: Token, input: string): string {
+  const what = t.type === "op" ? "operator" : t.type === "punc" ? "punctuation" : "token";
+  const hint = t.type === "op" && t.value === "!"
+    // Only *postfix* `!` reaches here: prefix `!x` parses (see parseUnary).
+    ? " Postfix '!' (the non-null assertion) is not part of the spec language — assert the value instead, e.g. `//@ requires x !== null`."
+    : "";
+  return `Unsupported ${what} '${tokenText(t)}' at offset ${t.pos} in //@ expression: ${input}.${hint}`;
+}
 
 const MULTI_OPS = ["<==>", "==>", "===", "!==", "==", "!=", ">=", "<=", "&&", "||"];
 
@@ -34,9 +51,10 @@ function tokenize(input: string): Token[] {
   let i = 0;
   while (i < input.length) {
     if (/\s/.test(input[i])) { i++; continue; }
+    const start = i;
 
     if (input[i] === "\\" && input.slice(i + 1, i + 7) === "result") {
-      tokens.push({ type: "result", value: undefined });
+      tokens.push({ type: "result", value: undefined, pos: start });
       i += 7;
       continue;
     }
@@ -60,7 +78,7 @@ function tokenize(input: string): Token[] {
         }
       }
       if (i < input.length) i++;
-      tokens.push({ type: "str", value: s });
+      tokens.push({ type: "str", value: s, pos: start });
       continue;
     }
 
@@ -73,22 +91,22 @@ function tokenize(input: string): Token[] {
       i += text.length;
       // The `n` suffix is meaningful, not noise: a BigInt keeps its exact value
       // as a decimal string instead of being rounded into a double.
-      if (bigintMatch) tokens.push({ type: "bigint", value: normalizeBigIntLiteral(text) });
-      else tokens.push({ type: "num", value: Number(text.replace(/_/g, "")) });
+      if (bigintMatch) tokens.push({ type: "bigint", value: normalizeBigIntLiteral(text), pos: start });
+      else tokens.push({ type: "num", value: Number(text.replace(/_/g, "")), pos: start });
       continue;
     }
 
     if (/[a-zA-Z_]/.test(input[i])) {
       let id = "";
       while (i < input.length && /[a-zA-Z_0-9]/.test(input[i])) id += input[i++];
-      tokens.push({ type: "ident", value: id });
+      tokens.push({ type: "ident", value: id, pos: start });
       continue;
     }
 
     let matched = false;
     for (const op of MULTI_OPS) {
       if (input.slice(i, i + op.length) === op) {
-        tokens.push({ type: "op", value: op });
+        tokens.push({ type: "op", value: op, pos: start });
         i += op.length;
         matched = true;
         break;
@@ -98,9 +116,9 @@ function tokenize(input: string): Token[] {
 
     const ch = input[i];
     if ("+-*/%><!?".includes(ch)) {
-      tokens.push({ type: "op", value: ch });
+      tokens.push({ type: "op", value: ch, pos: start });
     } else if ("()[],:.{}".includes(ch)) {
-      tokens.push({ type: "punc", value: ch });
+      tokens.push({ type: "punc", value: ch, pos: start });
     } else {
       throw new Error(`Unexpected '${ch}' at ${i} in: ${input}`);
     }
@@ -113,14 +131,16 @@ function tokenize(input: string): Token[] {
 
 class Parser {
   pos = 0;
-  constructor(private tokens: Token[]) {}
+  constructor(private tokens: Token[], private input: string) {}
 
   peek() { return this.tokens[this.pos]; }
   advance() { return this.tokens[this.pos++]; }
   expect(type: string, value?: string) {
     const t = this.advance();
-    if (!t || t.type !== type || (value !== undefined && t.value !== value))
-      throw new Error(`Expected ${type}${value ? ` '${value}'` : ""}, got ${t ? JSON.stringify(t) : "EOF"}`);
+    if (!t || t.type !== type || (value !== undefined && t.value !== value)) {
+      const got = t ? `'${tokenText(t)}' at offset ${t.pos}` : "the end of the expression";
+      throw new Error(`Expected ${type}${value ? ` '${value}'` : ""} here, got ${got} in //@ expression: ${this.input}`);
+    }
     return t;
   }
   match(type: string, value?: string) {
@@ -134,7 +154,7 @@ class Parser {
 
   parse(): Expr {
     const r = this.parseIff();
-    if (this.pos < this.tokens.length) throw new Error(`Unexpected: ${JSON.stringify(this.peek())}`);
+    if (this.pos < this.tokens.length) throw new Error(unsupportedToken(this.peek()!, this.input));
     return r;
   }
 
@@ -155,6 +175,14 @@ class Parser {
   parseTernary(): Expr {
     const cond = this.parseOr();
     if (this.match("op", "?")) {
+      // `x?.f` tokenizes as `?` then `.` — say what it is instead of reporting
+      // the `.` as if a `:` were missing.
+      if (this.peek()?.type === "punc" && this.peek()!.value === ".") {
+        throw new Error(
+          `Optional chaining ('?.') is not part of the spec language (offset ${this.peek()!.pos} in //@ expression: ${this.input}). ` +
+          "Test the receiver explicitly instead, e.g. `x === null || x.f === y`.",
+        );
+      }
       const then_ = this.parseIff();
       this.expect("punc", ":");
       const else_ = this.parseIff();
@@ -329,10 +357,10 @@ class Parser {
       }
       return { kind: "record", spread: null, fields };
     }
-    throw new Error(`Unexpected: ${JSON.stringify(t)}`);
+    throw new Error(unsupportedToken(t, this.input));
   }
 }
 
 export function parseExpr(input: string): Expr {
-  return new Parser(tokenize(input)).parse();
+  return new Parser(tokenize(input), input).parse();
 }
