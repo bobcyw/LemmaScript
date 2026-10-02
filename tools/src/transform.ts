@@ -1057,12 +1057,24 @@ function lowerExpr(e: TExpr, binds: Stmt[] | null): Expr {
     }
 
     case "optChain":
-      // Narrow should have rewritten optChain to someMatch.
-      throw new Error(`optChain reached transform — narrow should have rewritten it: ${JSON.stringify(e).slice(0, 400)}`);
+      // Narrow should have rewritten optChain to someMatch; reaching here is a
+      // tool bug, so say that instead of printing the internal record at the
+      // reader. The raw node stays, labelled, for whoever fixes it.
+      throw new Error(
+        "Internal limitation: an optional chain ('?.') reached the emitter unrewritten. " +
+        "This is a LemmaScript bug, not a problem with your code; rewriting the expression so the " +
+        "null check is explicit (e.g. `x === null ? null : x.f`) avoids it. " +
+        `Internal detail: ${JSON.stringify(e).slice(0, 300)}`,
+      );
 
     case "nullish":
-      // Narrow should have rewritten nullish to someMatch.
-      throw new Error(`nullish reached transform — narrow should have rewritten it: ${JSON.stringify(e).slice(0, 300)}`);
+      // Same as optChain: narrow owns this rewrite.
+      throw new Error(
+        "Internal limitation: a nullish coalescing expression ('??') reached the emitter unrewritten. " +
+        "This is a LemmaScript bug, not a problem with your code; rewriting it as an explicit check " +
+        "(e.g. `x === undefined ? fallback : x`) avoids it. " +
+        `Internal detail: ${JSON.stringify(e).slice(0, 300)}`,
+      );
 
     case "havoc":
       // Dafny's * only works in var/assign positions — lift to own declaration
