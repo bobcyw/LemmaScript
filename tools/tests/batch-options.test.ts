@@ -135,6 +135,32 @@ test("an explicit file keeps its existing CLI behavior", posixOnly, () => {
   assert.deepEqual(result.calls, [["verify", "--verification-time-limit", "120", "--cores=2", "--unicode-char:true", join(result.dir, "a.dfy")]]);
 });
 
+// A skipped entry is not a failure, so a batch where nothing ran still exits 0.
+// The tally is what makes that visible without reading every file's log.
+test("the batch summary counts skipped entries instead of hiding them", posixOnly, () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "lsc-batch-skip-")));
+  try {
+    writeFileSync(join(dir, "LemmaScript-files.txt"), "leanOnly.ts\n");
+    writeFileSync(join(dir, "leanOnly.ts"),
+      "//@ backend lean\nexport function identity(value: number): number { return value; }\n");
+    const result = spawnSync(process.execPath, ["--import", loader, cli, "--backend=dafny", "check"], {
+      cwd: dir, encoding: "utf8", timeout: 30_000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /lsc batch summary: entries=1 verified=0 generated=0 skipped=1/);
+    assert.match(result.stderr, /all 1 entries were skipped/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the batch summary counts verified entries", posixOnly, () => {
+  const result = runCli(["a.ts"], ["check"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /lsc batch summary: entries=1 verified=1 generated=0 skipped=0/);
+});
+
 for (const cmd of ["gen", "gen-check"]) {
   test(`${cmd} does not verify even with an explicit timeout`, posixOnly, () => {
     const result = runCli(["a.ts"], [cmd, "--time-limit=120", "--extra-flags=--cores=2"]);
