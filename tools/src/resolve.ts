@@ -380,6 +380,11 @@ function refEqHazard(ty: Ty, typeDecls: TypeDeclInfo[]): boolean {
 }
 
 const _warnedRefEq = new Set<string>();
+
+/** Properties with their own lowering on a `map` value; every other `.name` on
+ *  a map-typed receiver is a `Record` lookup. (`keys` is both an intrinsic and a
+ *  Map method — either way it must not become an index.) */
+const MAP_PROPERTY_INTRINSICS = new Set(["size", "length", "collectionSize", "keys", "toNat"]);
 function warnRefEq(op: string, l: Ty, r: Ty): void {
   const label = (t: Ty) => t.kind === "user" ? t.name : t.kind;
   const msg = `'${op}' compares non-primitive operands (${label(l)} ${op} ${label(r)}): structural equality in the proof, but reference equality when this TypeScript runs. Sound only if operands are primitives or a canonical (string/number) encoding; otherwise compare via an explicit structural equals.`;
@@ -980,6 +985,25 @@ function resolveExpr(e: RawExpr, ctx: Ctx): TExpr {
       let isDiscriminant = false;
       let ty: Ty = { kind: "unknown" };
 
+      // `Record<K, V>` lookup spelled `metadata.key`. The model stores the
+      // record as `map<seq<char>, V>`, which has no member `key`, so the member
+      // form has to become the index form. Done here — before narrow — so `?.`
+      // and `??` rewriting and the Option coercion are exactly the ones
+      // `metadata["key"]` already gets. Map methods and collection intrinsics
+      // keep their own handling: they are recognized below or as builtins.
+      if (obj.ty.kind === "map" &&
+          !MAP_PROPERTY_INTRINSICS.has(e.field) &&
+          recognizeBuiltin(obj.ty, e.field) === null) {
+        const idx: TExpr = { kind: "str", value: e.field, ty: { kind: "string" } };
+        const objPath = asTExprAccessPath(obj);
+        const idxPath = asTExprAccessPath(idx);
+        const narrowed = objPath && idxPath && ctx.narrowedIndices.some(
+          n => accessPathsEqual(n.obj, objPath) && accessPathsEqual(n.idx, idxPath)
+        );
+        const idxTy: Ty = narrowed ? obj.ty.value : { kind: "optional" as const, inner: obj.ty.value };
+        return { kind: "index", obj, idx, ty: idxTy };
+      }
+
       // Check narrowed path context (from conditional optional checks).
       // Applies when the current field-access forms a pure access path AND
       // that path is in the narrowedPaths list.
@@ -1038,7 +1062,17 @@ function resolveExpr(e: RawExpr, ctx: Ctx): TExpr {
       let stepInTy = obj.ty.kind === "optional" ? obj.ty.inner : obj.ty;
       const chain: import("./typedir.js").TChainStep[] = [];
       for (const step of e.chain) {
-        if (step.kind === "field") {
+        if (step.kind === "field" && stepInTy.kind === "map" &&
+            !MAP_PROPERTY_INTRINSICS.has(step.name) &&
+            recognizeBuiltin(stepInTy, step.name) === null) {
+          // `metadata?.key` on a `Record` is a map lookup, not a member
+          // projection — same shape as the index step below, so narrow's
+          // Option handling and the emitter's `key in m` guard apply unchanged.
+          const idx: TExpr = { kind: "str", value: step.name, ty: { kind: "string" } };
+          const idxTy: Ty = { kind: "optional", inner: stepInTy.value };
+          chain.push({ kind: "index", idx, ty: idxTy });
+          stepInTy = idxTy;
+        } else if (step.kind === "field") {
           const fieldTy = lookupFieldTy(stepInTy, step.name, ctx).ty;
           chain.push({ kind: "field", name: step.name, ty: fieldTy });
           stepInTy = fieldTy;
