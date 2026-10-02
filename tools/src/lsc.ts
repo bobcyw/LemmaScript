@@ -208,6 +208,13 @@ function readEntries(): { file: string; timeout?: number; flags?: string }[] {
     });
 }
 
+// Batch tallies. A skipped entry (`//@ backend` does not match `--backend`) is
+// not an error, so a batch where nothing was verified still exits 0 — exactly
+// the shape a green CI run must not be able to hide. Count every entry into one
+// bucket and print the tally, so "green" can be read as "N verified" instead of
+// "did not fail".
+const batchTally = { entries: 0, verified: 0, generated: 0, skipped: 0 };
+
 function effectiveOptions(
   sourcePath: string,
   sourceText: string,
@@ -279,6 +286,7 @@ function runBatch(
   }
   const verifySlow = slow || timeLimit !== undefined;
   for (const e of readEntries()) {
+    batchTally.entries++;
     const timeout = timeLimit ?? e.timeout;
     const flags = extraFlags ?? e.flags;
     if (cmd === "check" && backend === "dafny" && !verifySlow && timeout !== undefined && timeout > 60) {
@@ -287,6 +295,16 @@ function runBatch(
     } else {
       runFile(cmd, e.file, backend, timeout, flags, false, false, configPath);
     }
+  }
+  console.log(
+    `lsc batch summary: entries=${batchTally.entries} verified=${batchTally.verified} ` +
+    `generated=${batchTally.generated} skipped=${batchTally.skipped}`,
+  );
+  if (batchTally.entries > 0 && batchTally.verified === 0 && batchTally.generated === 0) {
+    console.error(
+      `WARNING: all ${batchTally.entries} entries were skipped (//@ backend does not match --backend=${backend}); ` +
+      "nothing was verified or generated.",
+    );
   }
 }
 
@@ -343,6 +361,7 @@ function runFile(
   const backendDirective = fullText.match(/\/\/@ backend (\w+)/);
   if (cmd !== "extract" && cmd !== "info" && backendDirective && backendDirective[1] !== backend) {
     console.log(`Skipped: ${path.basename(filePath)} (//@ backend ${backendDirective[1]}, current: ${backend})`);
+    batchTally.skipped++;
     return;
   }
 
@@ -420,16 +439,18 @@ function runFile(
     guardRelocatedDafnyProof(dir, artifactDir, base, dfyPath);
     mkdirSync(artifactDir, { recursive: true });
 
-    if (cmd === "gen") { dafnyGen(genPath, dfyPath, text); return; }
+    if (cmd === "gen") { batchTally.generated++; dafnyGen(genPath, dfyPath, text); return; }
     if (cmd === "gen-check") {
       dafnyGen(genPath, dfyPath, text);
       if (!dafnyCheckDiff(genPath, dfyPath)) process.exit(1);
+      batchTally.generated++;
       return;
     }
     if (cmd === "check") {
       dafnyGen(genPath, dfyPath, text);
       if (!dafnyCheckDiff(genPath, dfyPath)) process.exit(1);
       if (!dafnyVerify(dfyPath, artifactDir, timeLimit, extraFlags)) process.exit(1);
+      batchTally.verified++;
       return;
     }
     if (cmd === "regen") { dafnyRegen(genPath, dfyPath, basePath, text, artifactDir, timeLimit, extraFlags, noVerify); return; }
@@ -458,10 +479,11 @@ function runFile(
   const defPath = path.join(dir, `${leanBase}.def.lean`);
   const defText = emitLeanFile(defFile);
 
-  if (cmd === "gen") { leanGen(typesPath, defPath, typesText, defText); return; }
+  if (cmd === "gen") { batchTally.generated++; leanGen(typesPath, defPath, typesText, defText); return; }
   if (cmd === "check") {
     leanGen(typesPath, defPath, typesText, defText);
     if (!leanCheck(dir, leanBase)) process.exit(1);
+    batchTally.verified++;
     return;
   }
   console.error(`Unknown command: ${cmd}`);
