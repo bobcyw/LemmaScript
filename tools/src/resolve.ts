@@ -1402,7 +1402,11 @@ function resolveStmt(s: RawStmt, ctx: Ctx): [TStmt, Env | null] {
       // type into the array literal (see the arrayLiteral case). Optionals too
       // (`const r: TExpr | null = cond ? {…} : null`) — the record case unwraps
       // one optional level when consulting returnTy.
-      const initCtx = (declTy.kind === "user" || declTy.kind === "array" || declTy.kind === "optional")
+      // `map` matters as much as the others: without the declared type a
+      // `const m: Record<K, V> = {…}` initializer is a plain record literal, and
+      // that silently degrades to a *tuple* (`var m := (1, 2, 3)`) — a wrong
+      // program that still generates and only fails at verification.
+      const initCtx = (declTy.kind === "user" || declTy.kind === "array" || declTy.kind === "optional" || declTy.kind === "map")
         ? { ...ctx, returnTy: declTy } : ctx;
       let init = coerceStr(resolveExpr(s.init, initCtx), declTy);
       // Under noUncheckedIndexedAccess, TS gives `const e = arr[i]` type T | undefined

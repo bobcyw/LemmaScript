@@ -752,10 +752,17 @@ function emitStmt(s: Stmt, indent: number): string {
   const pad = "  ".repeat(indent);
   switch (s.kind) {
     case "let":
-      // Record literal assigned to map type → emit as map[k := v, ...]
-      if (s.type.kind === "map" && s.value.kind === "record" && !s.value.spread) {
-        const entries = s.value.fields.map(f => `${emitExpr({ kind: "str", value: f.name })} := ${emitExpr(f.value)}`);
-        return `${pad}var ${escapeName(s.name)}: ${tyToDafny(resolveTy(s.type))} := map[${entries.join(", ")}];`;
+      // A map-typed literal keeps the declared map type as an annotation. Keys
+      // come from the literal itself: transform has already turned a
+      // `Record<Union, V>` key into the variant constructor, so re-deriving the
+      // key from the field name here would put a string back where the declared
+      // key type is the union.
+      if (s.type.kind === "map" && (s.value.kind === "mapLiteral" ||
+          (s.value.kind === "record" && !s.value.spread))) {
+        const rhs = s.value.kind === "mapLiteral"
+          ? emitExpr(s.value)
+          : `map[${s.value.fields.map(f => `${emitExpr({ kind: "str", value: f.name })} := ${emitExpr(f.value)}`).join(", ")}]`;
+        return `${pad}var ${escapeName(s.name)}: ${tyToDafny(resolveTy(s.type))} := ${rhs};`;
       }
       if (s.value.kind === "havoc" || s.value.kind === "emptyMap" || s.value.kind === "emptySet" ||
           (s.value.kind === "arrayLiteral" && s.value.elems.length === 0))

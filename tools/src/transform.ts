@@ -935,6 +935,26 @@ function lowerExpr(e: TExpr, binds: Stmt[] | null): Expr {
     }
 
     case "record": {
+      // A map-typed record literal (`const m: Record<K, V> = { … }`) is a map,
+      // not a structure. Its keys are values of the declared key type: for a
+      // `Record<Union, V>` that is the variant constructor, not the field name
+      // as a string (emitting the string makes the initializer
+      // `map<seq<char>, V>` against a declared `map<Union, V>`), and leaving the
+      // literal untouched lets a local one degrade to a tuple — a wrong program
+      // that still generates.
+      if (e.ty.kind === "map" && !e.spread) {
+        const keyTy = e.ty.key;
+        const unionName = keyTy.kind === "user" && declOfKind(_typeDecls, tyBaseName(keyTy.name), "string-union")
+          ? tyBaseName(keyTy.name)
+          : undefined;
+        const entries = e.fields.map(fi => ({
+          key: unionName
+            ? ({ kind: "constructor", name: fi.name, type: unionName, args: [] } as Expr)
+            : lowerExpr({ kind: "str", value: fi.name, ty: { kind: "string" } }, binds),
+          value: lowerExpr(fi.value, binds),
+        }));
+        return { kind: "mapLiteral", entries };
+      }
       // Discriminated union: { kind: 'NoOp' } → constructor NoOp
       if (e.ty.kind === "user" && !e.spread) {
         const tyName = e.ty.name;
