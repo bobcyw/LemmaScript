@@ -96,8 +96,113 @@ test("launches lake build in the discovered project, preserving paths with space
   syncBuiltinESMExports();
   try {
     assert.equal(leanCheck(source, "example"), true);
-    assert.equal(spawn.mock.callCount(), 1);
-    assert.deepEqual(spawn.mock.calls[0].arguments, ["lake", ["build"], { cwd: root, stdio: "inherit" }]);
+    assert.equal(spawn.mock.callCount(), 2);
+    assert.deepEqual(spawn.mock.calls[0].arguments, [
+      "lake",
+      ["build", "«example.proof»"],
+      { cwd: root, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" },
+    ]);
+    assert.deepEqual(spawn.mock.calls[1].arguments, ["lake", ["build"], { cwd: root, stdio: "inherit" }]);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+}));
+
+// An unregistered module compiles nothing under a project-wide `lake build`,
+// which still exits 0. Verified in this checkout: `lake build «foo.proof»`
+// answers `error: unknown target `foo.proof`` for a module no library reaches.
+const unknownTargetError = (name: string) =>
+  Object.assign(new Error("lake build failed"), { stdout: `error: unknown target \`${name}\`\n` });
+
+for (const [marker, roots] of [
+  ["lakefile.lean", "lean_lib Examples where\n  roots := #[`«other.def», `«other.proof»]\n"],
+  ["lakefile.toml", "[[lean_lib]]\nname = \"Examples\"\nroots = [\"Other.def\", \"Other.proof\"]\n"],
+] as const) {
+  test(`rejects an unregistered module (${marker}) without the project-wide build`, (t) => fixture((root, source) => {
+    writeFileSync(path.join(root, marker), roots);
+    const spawn = t.mock.method(childProcess, "execFileSync", () => { throw unknownTargetError("example.proof"); });
+    const errors: string[] = [];
+    t.mock.method(console, "error", (message: string) => { errors.push(message); });
+    syncBuiltinESMExports();
+    try {
+      assert.equal(leanCheck(source, "example"), false);
+      assert.equal(spawn.mock.callCount(), 1, "the project-wide build must not run after the registration failure");
+      assert.match(errors.join("\n"), /is not registered in the Lake project/);
+      assert.match(errors.join("\n"), /roots/);
+    } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+  }));
+}
+
+for (const [marker, roots] of [
+  ["lakefile.lean", "lean_lib Examples where\n  roots := #[`«example.def», `«example.proof»]\n"],
+  ["lakefile.toml", "[[lean_lib]]\nname = \"Examples\"\nroots = [\"example.def\", \"example.proof\"]\n"],
+] as const) {
+  test(`falls back to the project-wide build when roots list the module (${marker})`, (t) => fixture((root, source) => {
+    writeFileSync(path.join(root, marker), roots);
+    const spawn = t.mock.method(childProcess, "execFileSync", (_file: string, args: string[]) => {
+      if (args.length === 2) throw unknownTargetError("example.proof");
+      return Buffer.alloc(0);
+    });
+    syncBuiltinESMExports();
+    try {
+      assert.equal(leanCheck(source, "example"), true);
+      assert.equal(spawn.mock.callCount(), 2);
+    } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+  }));
+}
+
+test("does not judge registration when no roots list is written down", (t) => fixture((root, source) => {
+  // Lake treats every module under the library's source directory as a root
+  // when `roots` is omitted, so absence of a list is not evidence of absence.
+  writeFileSync(path.join(root, "lakefile.lean"), "lean_lib Examples\n");
+  const spawn = t.mock.method(childProcess, "execFileSync", (_file: string, args: string[]) => {
+    if (args.length === 2) throw unknownTargetError("example.proof");
+    return Buffer.alloc(0);
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.equal(leanCheck(source, "example"), true);
+    assert.equal(spawn.mock.callCount(), 2);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+}));
+
+test("an unclear probe failure keeps its output and lets the project-wide build decide", (t) => fixture((root, source) => {
+  writeFileSync(path.join(root, "lakefile.lean"), "lean_lib Examples where\n  roots := #[`«example.proof»]\n");
+  const spawn = t.mock.method(childProcess, "execFileSync", (_file: string, args: string[]) => {
+    if (args.length === 2) {
+      throw Object.assign(new Error("lake build failed"), { stderr: "error: proof did not go through\n" });
+    }
+    return Buffer.alloc(0);
+  });
+  const written: string[] = [];
+  t.mock.method(process.stderr, "write", (chunk: string) => { written.push(String(chunk)); return true; });
+  syncBuiltinESMExports();
+  try {
+    assert.equal(leanCheck(source, "example"), true);
+    assert.equal(spawn.mock.callCount(), 2);
+    assert.match(written.join(""), /proof did not go through/);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+}));
+
+test("a project-wide build failure returns false", (t) => fixture((root, source) => {
+  writeFileSync(path.join(root, "lakefile.lean"), "lean_lib Examples where\n  roots := #[`«example.proof»]\n");
+  const spawn = t.mock.method(childProcess, "execFileSync", () => { throw new Error("lake build failed"); });
+  syncBuiltinESMExports();
+  try {
+    assert.equal(leanCheck(source, "example"), false);
+    assert.equal(spawn.mock.callCount(), 2);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+}));
+
+test("a missing lake binary is reported, not silently swallowed", (t) => fixture((root, source) => {
+  writeFileSync(path.join(root, "lakefile.lean"), "-- marker\n");
+  t.mock.method(childProcess, "execFileSync", () => {
+    throw Object.assign(new Error("spawn lake ENOENT"), { code: "ENOENT" });
+  });
+  const errors: string[] = [];
+  t.mock.method(console, "error", (message: string) => { errors.push(message); });
+  syncBuiltinESMExports();
+  try {
+    assert.equal(leanCheck(source, "example"), false);
+    assert.match(errors.join("\n"), /not found on PATH/);
   } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
 }));
 
