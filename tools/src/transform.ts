@@ -854,6 +854,25 @@ function lowerExpr(e: TExpr, binds: Stmt[] | null): Expr {
           return { kind: "app", fn: "FloorReal", args: [lowerExpr(arg, binds)] };
         return lowerExpr(arg, binds);
       }
+      // Math.round(x): JS rounds halves toward +∞, i.e. floor(x + 0.5)
+      // (Math.round(2.5) === 3, Math.round(-2.5) === -2). Integer args are
+      // already rounded, so they stay integer on every backend — no real
+      // round-trip. The real case needs a floor-over-real helper, which only the
+      // Dafny backend defines today; elsewhere it stays unsupported rather than
+      // emitting a helper that backend does not have.
+      if (e.fn.kind === "field" && e.fn.field === "round" && e.fn.obj.kind === "var" && e.fn.obj.name === "Math" && e.args.length === 1) {
+        const arg = e.args[0];
+        if (isIntegral(arg.ty)) return lowerExpr(arg, binds);
+        if (_opts.backend === "dafny") {
+          const lifted = lowerExpr(arg, binds);
+          const argReal: Expr = arg.ty.kind === "real" ? lifted : { kind: "toReal", expr: lifted };
+          return {
+            kind: "app",
+            fn: "FloorReal",
+            args: [{ kind: "binop", op: "+", left: argReal, right: { kind: "num", value: 0.5 } }],
+          };
+        }
+      }
       // Method call: receiver.method(args) → methodCall node
       if (e.fn.kind === "field") {
         const recv = lowerExpr(e.fn.obj, binds);
