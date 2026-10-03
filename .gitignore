@@ -6,3 +6,7 @@ node_modules/
 dist/
 
 
+
+# regen merge anchor: the generation a proof file was built from.
+# Regenerated on every passing check; never a source of truth.
+*.dfy.base
