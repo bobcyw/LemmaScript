@@ -42,6 +42,11 @@ function foldReadonlyConstMember(node: Node): RawExpr | null {
   }
   const decl = decls.find(d => Node.isVariableDeclaration(d)) as VariableDeclaration | undefined;
   if (!decl || decl.getVariableStatement()?.getDeclarationKind() !== VariableDeclarationKind.Const) return null;
+  // Module-level only. A local `const b = { items: [] }` is an ordinary value
+  // (a Dafny record/variable), handled by the normal field-access path — folding
+  // or refusing it would break code that works today (`b.items.push(…)`).
+  const stmt = decl.getVariableStatement();
+  if (!stmt || !Node.isSourceFile(stmt.getParent())) return null;
 
   let init: Expression | undefined = decl.getInitializer();
   let sawAsConst = false;

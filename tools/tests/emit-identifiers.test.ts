@@ -88,3 +88,36 @@ export function isRunning(s: Status): boolean {
   assert.match(out, /datatype Status = QUEUED \| RUNNING/);
   assert.match(out, /s\.RUNNING\?/);
 });
+
+// The sanitizer is reached with things that are not plain identifiers, and it
+// must leave them alone. Both of these broke the examples regression when the
+// sanitizer was first written (it mangled the type arguments and the field dot).
+test("an applied generic keeps its type arguments", posixOnly, () => {
+  const { status, stderr, out } = gen("e.ts", `type Result<T, E> = { ok: true; value: T } | { ok: false; error: E }
+interface Model { n: number }
+interface Err { msg: string }
+//@ verify
+export function ok(m: Model): Result<Model, Err> {
+  //@ ensures \result.ok === true
+  return { ok: true, value: m }
+}
+`);
+  assert.equal(status, 0, stderr);
+  assert.match(out, /Result<Model, Err>/, "the type application must survive verbatim");
+});
+
+test("a class field target keeps its dot", posixOnly, () => {
+  const { status, stderr, out } = gen("f.ts", `export class Counter {
+  private count: number;
+  constructor() { this.count = 0; }
+  bump(): number {
+    //@ verify
+    //@ ensures this.count >= 1
+    this.count = this.count + 1;
+    return this.count;
+  }
+}
+`);
+  assert.equal(status, 0, stderr);
+  assert.match(out, /this\.count/, "a field target is not an identifier to rewrite");
+});
