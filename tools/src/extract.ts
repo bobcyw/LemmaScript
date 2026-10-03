@@ -5,7 +5,7 @@
  * The only strings are //@ annotation expressions (parsed later by specparser).
  */
 
-import { Project, Node, FunctionDeclaration, InterfaceDeclaration, SourceFile, TypeAliasDeclaration, Type, SyntaxKind, Expression, ElementAccessExpression, ScriptTarget, VariableDeclaration, ts } from "ts-morph";
+import { Project, Node, FunctionDeclaration, InterfaceDeclaration, SourceFile, TypeAliasDeclaration, Type, SyntaxKind, Expression, ElementAccessExpression, ScriptTarget, VariableDeclaration, VariableDeclarationKind, ts } from "ts-morph";
 import type { TypeDeclInfo, VariantInfo } from "./types.js";
 import { initTypeParser } from "./types.js";
 import type { RawExpr, RawStmt, RawFunction, RawModule, RawClass, RawConst, RawGhostLet, RawGhostAssign } from "./rawir.js";
@@ -14,6 +14,70 @@ import { setUserNames, freshName } from "./names.js";
 import { DEFAULT_OPTIONS, type LscOptions } from "./config.js";
 
 // ── Expression extraction ────────────────────────────────────
+
+/** `X.k` where `X` is a `const` object literal declared `as const`: the value is
+ *  fixed at compile time, so fold it to that literal.
+ *
+ *  Why this matters: `as const` objects are the mainstream way to declare a
+ *  string union in TS (`const M = { a: 'a' } as const; type M = (typeof M)[keyof typeof M]`),
+ *  but the *object* is not extracted as a declaration — only its type is, as a
+ *  string union. Leaving the access alone therefore emits `X.k`, an identifier
+ *  the generated file never declares (`unresolved identifier: X`), while `gen`
+ *  still exits 0. Folding it to `'a'` also lets the string-union lowering turn
+ *  the literal into the datatype constructor, which is what the `//@ ensures`
+ *  path already does for the same comparison.
+ *
+ *  Only `as const` is folded: a plain `const` object's properties can still be
+ *  reassigned at runtime, so its value is not a compile-time constant. */
+function foldReadonlyConstMember(node: Node): RawExpr | null {
+  const path: string[] = [];
+  let cur: Node = node;
+  while (Node.isPropertyAccessExpression(cur)) { path.unshift(cur.getName()); cur = cur.getExpression(); }
+  if (!Node.isIdentifier(cur)) return null;
+  // `X` may be an imported name; follow the alias to the declaring file so the
+  // cross-file case (`import { VENDORS } from './keys'`) folds like the local one.
+  let decls = cur.getSymbol()?.getDeclarations() ?? [];
+  if (decls.length > 0 && decls.every(d => Node.isImportSpecifier(d) || Node.isImportClause(d) || Node.isNamespaceImport(d))) {
+    decls = cur.getSymbol()?.getAliasedSymbol()?.getDeclarations() ?? [];
+  }
+  const decl = decls.find(d => Node.isVariableDeclaration(d)) as VariableDeclaration | undefined;
+  if (!decl || decl.getVariableStatement()?.getDeclarationKind() !== VariableDeclarationKind.Const) return null;
+
+  let init: Expression | undefined = decl.getInitializer();
+  let sawAsConst = false;
+  while (init && (Node.isParenthesizedExpression(init) || Node.isAsExpression(init) || Node.isSatisfiesExpression(init))) {
+    if (Node.isAsExpression(init) && init.getTypeNode()?.getText().trim() === "const") sawAsConst = true;
+    init = init.getExpression();
+  }
+  if (!init || !Node.isObjectLiteralExpression(init)) return null;
+  if (!sawAsConst) {
+    // A mutable `const` object is not a compile-time constant, and the object is
+    // not extracted either, so the access can only be emitted as `X.k` — an
+    // identifier the generated file never declares. Refuse with the one-line fix.
+    throw new Error(
+      `Cannot model '${node.getText()}': '${cur.getText()}' is an object literal declared with a mutable \`const\`, ` +
+      `so its properties can be reassigned at runtime and its value is not a compile-time constant. ` +
+      `Declare it \`as const\` (or use a literal / a named string union) and regenerate.`,
+    );
+  }
+
+  // Walk the chain through nested object literals: `X.a.b`.
+  let value: Expression = init;
+  for (const seg of path) {
+    if (!Node.isObjectLiteralExpression(value)) return null;
+    const prop = value.getProperties().find(p => Node.isPropertyAssignment(p) && p.getName() === seg);
+    if (!prop || !Node.isPropertyAssignment(prop)) return null;
+    value = prop.getInitializerOrThrow();
+    while (Node.isParenthesizedExpression(value) || Node.isAsExpression(value) || Node.isSatisfiesExpression(value)) {
+      value = value.getExpression();
+    }
+  }
+  if (Node.isStringLiteral(value)) return { kind: "str", value: value.getLiteralValue() };
+  if (Node.isNumericLiteral(value)) return { kind: "num", value: value.getLiteralValue() };
+  if (value.getKind() === SyntaxKind.TrueKeyword) return { kind: "bool", value: true };
+  if (value.getKind() === SyntaxKind.FalseKeyword) return { kind: "bool", value: false };
+  return null;
+}
 
 /** When set, calls whose function/method name matches this key are replaced with havoc. */
 let _havocKey: string | null = null;
@@ -424,6 +488,8 @@ function extractExpr(node: Expression): RawExpr {
   // Non-`?` continuation of an existing optChain extends the chain (no new
   // short-circuit, just keep evaluating after the prior `?` succeeded).
   if (Node.isPropertyAccessExpression(node)) {
+    const folded = foldReadonlyConstMember(node);
+    if (folded) return folded;
     const obj = extractExpr(node.getExpression());
     const field = node.getName();
     if (node.hasQuestionDotToken()) {
