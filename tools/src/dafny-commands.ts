@@ -12,6 +12,74 @@ function writeGen(genPath: string, text: string) {
   console.log(`Generated: ${genPath}`);
 }
 
+/** Record the generation the proof file currently matches.
+ *
+ *  `regen` merges the proof against the generation it was built from. When that
+ *  record is missing it falls back to the `.dfy.gen` on disk — which a preceding
+ *  `check`/`gen` has already overwritten — and then the proof's still-old
+ *  generated lines look like hand edits, so the merge refuses them and the file
+ *  is stuck ("still modifies generated lines after merging"). Persisting the
+ *  anchor every time a check confirms proof == gen + additions keeps that
+ *  natural flow (edit TS → check goes red → regen) working. */
+export function recordRegenAnchor(basePath: string, genPath: string): void {
+  try { writeFileSync(basePath, readFileSync(genPath, "utf-8")); } catch { /* best effort */ }
+}
+
+/** Generated lines the *previous* generation emitted and the current one does
+ *  not, that are still sitting in the proof file.
+ *
+ *  They are not hand-written additions: the additions-only gate cannot tell the
+ *  difference, so a spec removed at the source keeps its old generated lemma in
+ *  the `.dfy` and the verifier then judges the *old* spec — surfacing as
+ *  "a postcondition could not be proved", which reads like the implementation
+ *  broke. Refuse that, and name the lines and the fix (`regen` drops them,
+ *  because the merge knows they were generated).
+ *
+ *  Best effort: with no anchor there is nothing to compare against. */
+export function staleGeneratedLines(basePath: string, genPath: string, dfyPath: string): string[] {
+  if (!existsSync(basePath)) return [];
+  const count = (text: string): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const line of text.split("\n")) m.set(line, (m.get(line) ?? 0) + 1);
+    return m;
+  };
+  const anchor = count(readFileSync(basePath, "utf-8"));
+  const gen = count(readFileSync(genPath, "utf-8"));
+  const dfy = count(readFileSync(dfyPath, "utf-8"));
+  const stale: string[] = [];
+  for (const [line, n] of anchor) {
+    if (line.trim() === "") continue;
+    const gone = n - (gen.get(line) ?? 0);
+    if (gone > 0 && (dfy.get(line) ?? 0) > 0) stale.push(line);
+  }
+  return stale;
+}
+
+/** Generated lines the *previous* generation emitted and the current one does
+ *  not, that are still sitting in the proof file.
+ *
+ *  They are not hand-written additions: the additions-only gate cannot tell the
+ *  difference, so a spec removed at the source keeps its old generated lemma in
+ *  the `.dfy` and the verifier then judges the *old* spec — surfacing as
+ *  "a postcondition could not be proved", which reads like the implementation
+ *  broke. Refuse that, and name the lines and the fix (`regen` drops them,
+ *  because the merge knows they were generated).
+ *
+ *  Best effort: with no anchor there is nothing to compare against. */
+export function dafnyCheckNoStaleGenerated(basePath: string, genPath: string, dfyPath: string): boolean {
+  const stale = staleGeneratedLines(basePath, genPath, dfyPath);
+  if (stale.length === 0) return true;
+  console.error(
+    `ERROR: ${path.basename(dfyPath)} still contains ${stale.length} generated line(s) that the current source no longer produces.`,
+  );
+  for (const l of stale.slice(0, 5)) console.error(`  - ${l.trim()}`);
+  console.error(
+    `  This is NOT a failed proof: the verifier would be judging the old specification (a spec deleted at the source keeps its old lemma here). ` +
+    `Run \`lsc regen\` — it knows these lines were generated and drops them.`,
+  );
+  return false;
+}
+
 export function dafnyGen(genPath: string, dfyPath: string, text: string) {
   writeGen(genPath, text);
   if (!existsSync(dfyPath)) {
@@ -193,6 +261,11 @@ export function dafnyRegen(genPath: string, dfyPath: string, basePath: string, t
         copyFileSync(dfyPath, mergedPath);
         writeFileSync(dfyPath, savedDfy);
         console.error(`CONFLICT: ${path.basename(dfyPath)} — merge had conflicts, dfy restored. See ${path.basename(mergedPath)}`);
+        const stale = staleGeneratedLines(basePath, genPath, dfyPath);
+        if (stale.length > 0) {
+          console.error(`  This conflict involves ${stale.length} generated line(s) the current source no longer produces — drop them from the proof file:`);
+          for (const l of stale.slice(0, 5)) console.error(`    - ${l.trim()}`);
+        }
         process.exit(1);
       }
       throw e;
@@ -201,7 +274,12 @@ export function dafnyRegen(genPath: string, dfyPath: string, basePath: string, t
 
   // 6. Check gen invariant (unconditional)
   if (!dafnyCheckDiff(genPath, dfyPath)) {
-    console.error(`FAILED: ${path.basename(dfyPath)} still modifies generated lines after merging — fix those lines in the proof file before verifying.`);
+    console.error(
+      `FAILED: ${path.basename(dfyPath)} still modifies generated lines after merging — the proof file holds generated text from an older ` +
+      `generation and no base was available to merge against. (A preceding failed \`check\` overwrites .dfy.gen, which is the usual cause.)\n` +
+      `  Restore the generation the proof was built from, e.g. \`git checkout -- ${path.basename(genPath)}\`, then re-run \`lsc regen\`. ` +
+      `Do not hand-edit generated lines; if the proof has no hand-written additions, rebuilding the .dfy from scratch is equivalent.`,
+    );
     process.exit(1);
   }
 

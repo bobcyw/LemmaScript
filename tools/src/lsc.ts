@@ -18,7 +18,7 @@ import { transformModuleLean, transformModuleDafny } from "./transform.js";
 import { peepholeModule } from "./peephole.js";
 import { emitLeanFile, resetLeanModule } from "./lean-emit.js";
 import { emitDafnyFile, emittedNameMap } from "./dafny-emit.js";
-import { dafnyGen, dafnyCheckDiff, dafnyVerify, dafnyRegen } from "./dafny-commands.js";
+import { dafnyGen, dafnyCheckDiff, dafnyCheckNoStaleGenerated, dafnyVerify, dafnyRegen, recordRegenAnchor } from "./dafny-commands.js";
 import { leanGen, leanCheck } from "./lean-commands.js";
 import { runInfo, runTypedInfo, type TypedInfoDafny } from "./info-command.js";
 import {
@@ -449,6 +449,9 @@ function runFile(
     if (cmd === "check") {
       dafnyGen(genPath, dfyPath, text);
       if (!dafnyCheckDiff(genPath, dfyPath)) process.exit(1);
+      if (!dafnyCheckNoStaleGenerated(basePath, genPath, dfyPath)) process.exit(1);
+      // Proof matches this generation: remember it as the base `regen` merges against.
+      recordRegenAnchor(basePath, genPath);
       if (!dafnyVerify(dfyPath, artifactDir, timeLimit, extraFlags)) process.exit(1);
       batchTally.verified++;
       return;
