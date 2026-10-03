@@ -114,9 +114,31 @@ function collectHavocedTypeNames(v: unknown, out: Set<string>): void {
 // per file. (The raw freshName layer stays — Lean has a different escaping story.)
 
 function dafnyBaseName(name: string): string {
-  if (DAFNY_KEYWORDS.has(name)) return `${name}_`;
-  if (name.startsWith("_")) return `i${name}`;  // Dafny forbids leading `_`
-  return name;
+  // Every user and generated name passes through here, so this is the one place
+  // to make a name a legal Dafny identifier. Two shapes arrive that are not:
+  // temporaries from transpiled code (`i__@iterator@133` — `@` is never legal)
+  // and union variants that are not identifiers (`360p`). Emitting either as-is
+  // produces a file Dafny cannot even parse, which the old behaviour did while
+  // still exiting 0 — the same false green as a wrong program.
+  const safe = name.replace(/[^A-Za-z0-9_']/g, "_");
+  if (DAFNY_KEYWORDS.has(safe)) return `${safe}_`;
+  if (safe.startsWith("_")) return `i${safe}`;  // Dafny forbids leading `_`
+  if (/^[0-9]/.test(safe)) return `i${safe}`;   // and a leading digit
+  return safe;
+}
+
+/** Refuse a name that is plainly a *rendered type* (`{ a: string }`,
+ *  `Result<A, B>`) rather than an identifier. Mangling it would emit a
+ *  confusing mystery name and hide the one-line fix, so fail closed and say what
+ *  to rename. Names that merely contain a TS identifier character Dafny lacks
+ *  (`$`) are left to `dafnyBaseName`, which mangles them consistently. */
+function requireDeclarableName(raw: string, what: string): void {
+  if (!/[{}<>|,\s[\]()]/.test(raw)) return;
+  throw new Error(
+    `Cannot emit a Dafny ${what} named '${raw}': that is a type expression, not an identifier, and ` +
+    `Dafny has no anonymous object types. Name it in the TypeScript — e.g. ` +
+    `\`interface Params { a: string }\` and use \`Params\` — then regenerate.`,
+  );
 }
 
 let _userDafnyNames = new Map<string, string>();
@@ -869,15 +891,18 @@ function emitDecl(d: Decl): string {
         const fields = c.fields.map(f => collides.has(f.name) ? { ...f, name: `${f.name}_${c.name.replace(/[^A-Za-z0-9_'?]/g, "_")}` } : f);
         return `${dafnyCtorName(c.name)}(${paramList(fields)})`;
       });
+      requireDeclarableName(d.name, "datatype");
       return `datatype ${escapeName(d.name)}${tp} = ${ctors.join(" | ")}`;
     }
 
     case "structure": {
       const tp = d.typeParams?.length ? `<${d.typeParams.join(", ")}>` : "";
+      requireDeclarableName(d.name, "datatype");
       return `datatype ${escapeName(d.name)}${tp} = ${escapeName(d.name)}(${paramList(d.fields)})`;
     }
 
     case "type-alias": {
+      requireDeclarableName(d.name, "type");
       return `type ${escapeName(d.name)} = ${tyToDafny(d.target)}`;
     }
 
@@ -886,6 +911,7 @@ function emitDecl(d: Decl): string {
       // that derive structural equality. Never constructed or destructured.
       // `0` (auto-init) only when a havoc of this type needs a witness to
       // satisfy definite assignment — `var x: T := *` requires it.
+      requireDeclarableName(d.name, "type");
       const autoInit = _havocedTypeNames.has(d.name) ? ", 0" : "";
       return `type ${escapeName(d.name)}(==${autoInit})`;
     }
