@@ -2701,12 +2701,22 @@ export function extractModule(sourceFile: SourceFile, options: LscOptions = DEFA
       if (declaredNames.has(aliasName)) return;
       if (!knownTypes.has(aliasName) && !builtins.has(aliasName) && !aliasName.startsWith("__")) {
         const decls = alias.getDeclarations();
-        if (decls.length > 0 && Node.isTypeAliasDeclaration(decls[0])) {
+        // The symbol can carry several declarations under one name — a `const X`
+        // and a `type X` is a mainstream TS pattern. Take the type alias, not
+        // `decls[0]`: with the const first, this fell through to the record
+        // branch below, where a string-literal union's *common* properties are
+        // String.prototype's (toString, charAt, …) — 51 opaque types and then a
+        // verifier crash, from a type that is simply a string union.
+        const aliasDecl = decls.find(d => Node.isTypeAliasDeclaration(d));
+        if (aliasDecl) {
           const extra: TypeDeclInfo[] = [];
-          const info = extractTypeDecl(decls[0], extra);
+          const info = extractTypeDecl(aliasDecl as TypeAliasDeclaration, extra);
           if (info) { typeDecls.push(...extra); typeDecls.push(info); knownTypes.add(aliasName); }
-        } else if (t.getProperties().length > 0) {
-          // Alias declaration not available (e.g. intersection type) — extract from properties
+        } else if ((t.isObject() || t.isIntersection()) && t.getProperties().length > 0) {
+          // Alias declaration not available (e.g. intersection type) — extract from properties.
+          // A union must never reach `extractRecord`: enumerating its properties
+          // yields the members its members have in common, which for a string
+          // literal union is the whole String prototype.
           const extra: TypeDeclInfo[] = [];
           const info = extractRecord(aliasName, t, locationNode, undefined, extra);
           if (info) { typeDecls.push(...extra); typeDecls.push(info); knownTypes.add(aliasName); }
