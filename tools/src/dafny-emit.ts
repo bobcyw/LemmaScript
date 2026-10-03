@@ -120,7 +120,12 @@ function dafnyBaseName(name: string): string {
   // and union variants that are not identifiers (`360p`). Emitting either as-is
   // produces a file Dafny cannot even parse, which the old behaviour did while
   // still exiting 0 — the same false green as a wrong program.
-  const safe = name.replace(/[^A-Za-z0-9_']/g, "_");
+  // This function is also reached with things that are not plain identifiers and
+  // must survive verbatim: an applied generic (`Result<Model, Err>`) and a class
+  // field target (`this.count`). So keep the punctuation those need and replace
+  // only what is illegal in either shape — `@` from a transpiled temporary, `$`
+  // from a TS name, and so on.
+  const safe = name.replace(/[^A-Za-z0-9_'<>,. ]/g, "_");
   if (DAFNY_KEYWORDS.has(safe)) return `${safe}_`;
   if (safe.startsWith("_")) return `i${safe}`;  // Dafny forbids leading `_`
   if (/^[0-9]/.test(safe)) return `i${safe}`;   // and a leading digit
