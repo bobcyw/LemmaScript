@@ -379,6 +379,22 @@ function flattenLambdaBody(stmts: Stmt[]): Expr | null {
  *  `((i >= 0) && carry) != 0`, which is not well-typed.
  *
  *  Optional conds never arrive here — narrow.ts rewrites them to someMatch. */
+/** Where a string union is expected, a *string literal* must be emitted as the
+ *  datatype constructor: `map<TaskType, _>` holding `"UNIFIED_IMAGE_GENERATION"`
+ *  is a type error, and a member of an `as const` object (`X.K`) folds to exactly
+ *  that string. Used for map keys and map values — the two positions where the
+ *  expected type is known here. A string that is *expected* to be a string
+ *  (concatenation, indexing a `map<string, _>`) keeps its literal form. */
+function coerceToUnionVariant(expr: Expr, ty: Ty | undefined): Expr {
+  if (!ty || ty.kind !== "user") return expr;
+  const base = tyBaseName(ty.name);
+  const decl = declOfKind(_typeDecls, base, "string-union");
+  if (!decl || !decl.values) return expr;
+  if (expr.kind === "str" && decl.values.includes(expr.value))
+    return { kind: "constructor", name: expr.value, type: base, args: [] };
+  return expr;
+}
+
 function asCondition(e: TExpr): TExpr {
   const bool: Ty = { kind: "bool" };
   if (e.ty.kind === "bool") return e;
@@ -912,6 +928,10 @@ function lowerExpr(e: TExpr, binds: Stmt[] | null): Expr {
         // (the desugared spread { ...m, [k]: m2[k] } becomes m.set(k, m2.get(k)),
         // but the value should be direct access, not Optional)
         if (method === "set" && e.fn.obj.ty.kind === "map" && args.length === 2) {
+          // Computed key of a `Record<Union, V>` literal (`[X.K]: {...}`) reaches
+          // here as a plain string once `X.K` folds; it must be the constructor.
+          args[0] = coerceToUnionVariant(args[0], e.fn.obj.ty.key);
+          args[1] = coerceToUnionVariant(args[1], e.fn.obj.ty.value);
           const val = args[1];
           if (val.kind === "methodCall" && val.method === "get" && val.objTy.kind === "map") {
             args[1] = { ...val, method: "getDirect" };
@@ -944,14 +964,12 @@ function lowerExpr(e: TExpr, binds: Stmt[] | null): Expr {
       // that still generates.
       if (e.ty.kind === "map" && !e.spread) {
         const keyTy = e.ty.key;
-        const unionName = keyTy.kind === "user" && declOfKind(_typeDecls, tyBaseName(keyTy.name), "string-union")
-          ? tyBaseName(keyTy.name)
-          : undefined;
+        const valueTy = e.ty.value;
         const entries = e.fields.map(fi => ({
-          key: unionName
-            ? ({ kind: "constructor", name: fi.name, type: unionName, args: [] } as Expr)
-            : lowerExpr({ kind: "str", value: fi.name, ty: { kind: "string" } }, binds),
-          value: lowerExpr(fi.value, binds),
+          key: coerceToUnionVariant({ kind: "str", value: fi.name, ty: { kind: "string" } } as Expr, keyTy),
+          // Values too: a member of an `as const` object folds to its string, and
+          // a `Record<K, Union>` whose value type is the union needs the variant.
+          value: coerceToUnionVariant(lowerExpr(fi.value, binds), valueTy),
         }));
         return { kind: "mapLiteral", entries };
       }
@@ -1033,11 +1051,13 @@ function lowerExpr(e: TExpr, binds: Stmt[] | null): Expr {
       // works for a handful of entries but Dafny's type resolver stack-
       // overflows on hundreds; the flat form is fine at any size.)
       if (e.fields.length > 0 && !e.spread && e.ty.kind === "map") {
+        const keyTy = e.ty.key;
+        const valueTy = e.ty.value;
         return {
           kind: "mapLiteral",
           entries: e.fields.map(f => ({
-            key: { kind: "str" as const, value: f.name },
-            value: lowerExpr(f.value, binds),
+            key: coerceToUnionVariant({ kind: "str" as const, value: f.name }, keyTy),
+            value: coerceToUnionVariant(lowerExpr(f.value, binds), valueTy),
           })),
         };
       }
